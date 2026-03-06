@@ -1,0 +1,2523 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>言忆 - AI角色记忆系统</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
+            background-attachment: fixed;
+            min-height: 100vh;
+            padding: 15px;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        
+        .glass-effect {
+            background: rgba(255, 255, 255, 0.98);
+            backdrop-filter: blur(10px);
+            border-radius: 16px;
+            box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
+            border: 1px solid rgba(255, 255, 255, 0.18);
+        }
+        
+        .tab-content {
+            display: none;
+            animation: fadeIn 0.3s ease-in;
+        }
+        
+        .tab-content.active {
+            display: block;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        
+        .chat-message {
+            margin-bottom: 15px;
+            display: flex;
+            animation: slideIn 0.3s ease-out;
+        }
+        
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        .message-user {
+            justify-content: flex-end;
+        }
+        
+        .message-ai {
+            justify-content: flex-start;
+        }
+        
+        .message-wrapper {
+            display: flex;
+            align-items: flex-end;
+            gap: 10px;
+            max-width: 75%;
+        }
+        
+        .message-user .message-wrapper {
+            flex-direction: row-reverse;
+        }
+        
+        .message-avatar {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            font-weight: bold;
+            flex-shrink: 0;
+        }
+        
+        .message-user .message-avatar {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        
+        .message-ai .message-avatar {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            color: white;
+        }
+        
+        .message-content {
+            padding: 12px 16px;
+            border-radius: 14px;
+            word-wrap: break-word;
+            line-height: 1.6;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+            animation: popIn 0.3s ease-out;
+        }
+        
+        @keyframes popIn {
+            from {
+                opacity: 0;
+                transform: scale(0.9);
+            }
+            to {
+                opacity: 1;
+                transform: scale(1);
+            }
+        }
+        
+        .message-user .message-content {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-bottom-right-radius: 4px;
+        }
+        
+        .message-ai .message-content {
+            background: #f0f0f0;
+            color: #333;
+            border-bottom-left-radius: 4px;
+        }
+        
+        .message-error .message-avatar {
+            background: linear-gradient(135deg, #f5576c 0%, #ff6b6b 100%);
+            color: white;
+        }
+        
+        .message-error .message-content {
+            background: #ffe0e0;
+            color: #d32f2f;
+            border-left: 4px solid #f5576c;
+            border-bottom-left-radius: 4px;
+        }
+        
+        .message-time {
+            font-size: 12px;
+            color: #999;
+            margin-top: 4px;
+        }
+        
+        .typing-indicator {
+            display: flex;
+            gap: 4px;
+            padding: 12px 16px;
+            background: #f0f0f0;
+            border-radius: 20px;
+            width: fit-content;
+        }
+        
+        .typing-dot {
+            width: 8px;
+            height: 8px;
+            background: #999;
+            border-radius: 50%;
+            animation: bounce 1.4s infinite;
+        }
+        
+        .typing-dot:nth-child(2) {
+            animation-delay: 0.2s;
+        }
+        
+        .typing-dot:nth-child(3) {
+            animation-delay: 0.4s;
+        }
+        
+        @keyframes bounce {
+            0%, 60%, 100% {
+                opacity: 0.5;
+                transform: translateY(0);
+            }
+            30% {
+                opacity: 1;
+                transform: translateY(-10px);
+            }
+        }
+        
+        .stat-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 12px;
+            text-align: center;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+            transition: transform 0.3s;
+        }
+        
+        .stat-card:hover {
+            transform: translateY(-5px);
+        }
+        
+        .stat-number {
+            font-size: 32px;
+            font-weight: bold;
+            margin: 10px 0;
+        }
+        
+        .stat-label {
+            font-size: 14px;
+            opacity: 0.9;
+        }
+        
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 10px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.3s;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+        }
+        
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(102, 126, 234, 0.5);
+        }
+        
+        .btn-primary:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .btn-secondary {
+            background: #f0f0f0;
+            color: #333;
+            border: 1px solid #ddd;
+            padding: 12px 24px;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .btn-secondary:hover {
+            background: #e0e0e0;
+        }
+        
+        .btn-danger {
+            background: linear-gradient(135deg, #f5576c 0%, #f093fb 100%);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .btn-danger:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(245, 87, 108, 0.4);
+        }
+        
+        .input-field {
+            width: 100%;
+            padding: 14px;
+            border: 2px solid #ddd;
+            border-radius: 10px;
+            font-size: 14px;
+            transition: border-color 0.3s, box-shadow 0.3s;
+        }
+        
+        .input-field:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+        
+        .tab-button {
+            padding: 14px 24px;
+            border: none;
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+            cursor: pointer;
+            font-size: 14px;
+            border-radius: 8px 8px 0 0;
+            transition: all 0.3s;
+            border-bottom: 2px solid transparent;
+        }
+        
+        .tab-button.active {
+            background: white;
+            color: #667eea;
+            border-bottom: 2px solid #667eea;
+        }
+        
+        .memory-item {
+            background: #f9f9f9;
+            padding: 14px;
+            border-left: 4px solid #667eea;
+            margin-bottom: 12px;
+            border-radius: 6px;
+            transition: all 0.3s;
+        }
+        
+        .memory-item:hover {
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+        
+        .memory-category {
+            display: inline-block;
+            background: #667eea;
+            color: white;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            margin-top: 8px;
+        }
+        
+        .memory-delete-btn {
+            float: right;
+            background: #f44336;
+            color: white;
+            border: none;
+            padding: 4px 8px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+        
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            padding: 16px 20px;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+            animation: slideInUp 0.3s ease-out;
+            z-index: 1000;
+            max-width: 300px;
+        }
+        
+        @keyframes slideInUp {
+            from {
+                transform: translateY(100px);
+                opacity: 0;
+            }
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+        
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 500;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .modal.show {
+            display: flex;
+        }
+        
+        .modal-content {
+            background: white;
+            padding: 30px;
+            border-radius: 16px;
+            width: 90%;
+            max-width: 500px;
+            max-height: 80vh;
+            overflow-y: auto;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+        }
+        
+        .header-gradient {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        
+        /* 流式输出光标闪烁动画 */
+        .streaming-cursor {
+            animation: blink 0.8s step-end infinite;
+            color: #667eea;
+            font-weight: bold;
+        }
+        @keyframes blink {
+            50% { opacity: 0; }
+        }
+        
+        @media (max-width: 768px) {
+            .message-wrapper {
+                max-width: 90%;
+            }
+            
+            .container {
+                padding: 0;
+            }
+            
+            body {
+                padding: 8px;
+            }
+        }
+        
+        .tab-button {
+            padding: 10px 20px;
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-size: 14px;
+            border-radius: 8px 8px 0 0;
+            transition: all 0.3s;
+            border-bottom: 2px solid transparent;
+        }
+        
+        .tab-button.active {
+            background: white;
+            color: #667eea;
+            border-bottom: 2px solid #667eea;
+        }
+        
+        .memory-item {
+            background: #f9f9f9;
+            padding: 12px;
+            border-left: 3px solid #667eea;
+            margin-bottom: 10px;
+            border-radius: 4px;
+        }
+        
+        .memory-category {
+            display: inline-block;
+            background: #667eea;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            margin-top: 5px;
+        }
+        
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            padding: 15px 20px;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 8px 16px rgba(0, 0, 0, 0.15);
+            animation: slideInUp 0.3s ease-out;
+            z-index: 1000;
+        }
+        
+        @keyframes slideInUp {
+            from {
+                transform: translateY(100px);
+                opacity: 0;
+            }
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+        
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 500;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .modal.show {
+            display: flex;
+        }
+        
+        .modal-content {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            width: 90%;
+            max-width: 500px;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+        
+        /* 角色选择器按钮 */
+        .char-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 16px;
+            border-radius: 20px;
+            background: rgba(255,255,255,0.2);
+            color: white;
+            border: 2px solid transparent;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.25s;
+            white-space: nowrap;
+        }
+        .char-pill:hover { background: rgba(255,255,255,0.35); }
+        .char-pill.active {
+            background: rgba(255,255,255,0.5);
+            border-color: white;
+            font-weight: 700;
+        }
+        
+        /* 角色卡片 */
+        .char-card {
+            border: 2px solid #e5e7eb;
+            border-radius: 14px;
+            padding: 18px;
+            background: white;
+            transition: all 0.2s;
+            position: relative;
+        }
+        .char-card:hover { border-color: #667eea; box-shadow: 0 4px 16px rgba(102,126,234,0.15); }
+        .char-card.active-card { border-color: #667eea; background: linear-gradient(135deg, #eef2ff 0%, #faf5ff 100%); }
+        .char-card .card-badge {
+            position: absolute;
+            top: -10px;
+            right: 12px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            font-size: 11px;
+            padding: 2px 10px;
+            border-radius: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- 头部 -->
+        <div class="glass-effect mb-6 p-8 text-center header-gradient rounded-2xl">
+            <h1 class="text-4xl font-bold mb-3">言忆</h1>
+            <p class="text-white text-lg opacity-90">AI角色记忆与对话工作台 • 多角色 • 可扩展 • 隐私优先</p>
+            <!-- 角色切换栏 -->
+            <div id="characterBar" class="mt-4 flex items-center justify-center gap-2 flex-wrap">
+                <!-- 角色卡片由 JS 动态渲染 -->
+            </div>
+            <div class="mt-3 flex items-center justify-center gap-4">
+                <p class="text-white text-sm opacity-75">当前模型: <span id="modelStatus" class="font-bold">加载中...</span></p>
+                <select id="modelSelectHeader" class="px-4 py-2 rounded-lg bg-white bg-opacity-20 text-white cursor-pointer border border-white border-opacity-30" onchange="switchModelFromHeader()">
+                    <option value="ollama">🏠 本地(Ollama)</option>
+                    <option value="deepseek-chat">🚀 DeepSeek</option>
+                    <option value="gpt-3.5-turbo">⚡ GPT-3.5-turbo</option>
+                    <option value="gpt-4-turbo">⚡ GPT-4-turbo</option>
+                    <option value="claude-3-sonnet">✨ Claude</option>
+                </select>
+            </div>
+        </div>
+        
+        <!-- 服务状态指示器 -->
+        <div id="statusBar" class="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg hidden">
+            <p class="text-sm text-yellow-800">
+                <strong>⚠️ 服务状态:</strong>
+                <span id="fastApiStatus">FastAPI: <span class="font-bold text-green-600">✓ 已连接</span></span> | 
+                <span id="ollamaStatus">Ollama: <span class="font-bold text-red-600">✗ 未运行</span></span>
+            </p>
+            <p class="text-xs text-yellow-700 mt-2">请在命令行运行: <code style="background: rgba(0,0,0,0.1); padding: 2px 6px; border-radius: 3px;">ollama serve</code></p>
+        </div>
+        
+        <!-- 主容器 -->
+        <div class="glass-effect rounded-2xl overflow-hidden">
+            <!-- 标签栏 -->
+            <div class="flex tab-bar overflow-x-auto border-b border-gray-200 bg-gray-50">
+                <button class="tab-button active" onclick="switchTab('overview', this)">🧭 功能总览</button>
+                <button class="tab-button" onclick="switchTab('chat', this)">💬 对话</button>
+                <button class="tab-button" onclick="switchTab('import', this)">📥 导入</button>
+                <button class="tab-button" onclick="switchTab('memory', this)">🧠 记忆</button>
+                <button class="tab-button" onclick="switchTab('personality', this)">🧩 角色</button>
+                <button class="tab-button" onclick="switchTab('stats', this)">📊 统计</button>
+                <button class="tab-button" onclick="switchTab('settings', this)">⚙️ 设置</button>
+            </div>
+            
+            <div class="p-6">
+                <!-- 总览标签页 -->
+                <div id="overview" class="tab-content active">
+                    <h3 class="text-lg font-bold mb-4">🧭 言忆功能总览</h3>
+                    <p class="text-sm text-gray-600 mb-4">系统支持多角色（不限于恋爱场景），可用于伴侣、朋友、教练、顾问、学习搭子等不同人格层面。</p>
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
+                        <div class="p-4 border rounded-xl bg-white">
+                            <h4 class="font-bold mb-2">💬 智能对话</h4>
+                            <p class="text-sm text-gray-600 mb-3">支持本地/外部模型，支持流式回复与记忆注入。</p>
+                            <button class="btn-secondary text-xs px-3 py-1" onclick="goTab('chat')">进入对话</button>
+                        </div>
+                        <div class="p-4 border rounded-xl bg-white">
+                            <h4 class="font-bold mb-2">📥 聊天导入</h4>
+                            <p class="text-sm text-gray-600 mb-3">导入微信/QQ对话，自动转化为可学习语料。</p>
+                            <button class="btn-secondary text-xs px-3 py-1" onclick="goTab('import')">进入导入</button>
+                        </div>
+                        <div class="p-4 border rounded-xl bg-white">
+                            <h4 class="font-bold mb-2">🧠 长期记忆</h4>
+                            <p class="text-sm text-gray-600 mb-3">语义检索与高质量记忆上下文增强。</p>
+                            <button class="btn-secondary text-xs px-3 py-1" onclick="goTab('memory')">进入记忆</button>
+                        </div>
+                        <div class="p-4 border rounded-xl bg-white">
+                            <h4 class="font-bold mb-2">🧩 角色管理</h4>
+                            <p class="text-sm text-gray-600 mb-3">每个角色独立人设、文风、聊天与数据。</p>
+                            <button class="btn-secondary text-xs px-3 py-1" onclick="goTab('personality')">进入角色</button>
+                        </div>
+                        <div class="p-4 border rounded-xl bg-white">
+                            <h4 class="font-bold mb-2">📝 风格提取</h4>
+                            <p class="text-sm text-gray-600 mb-3">一键提取当前角色的口头禅、语气词和表达节奏。</p>
+                            <button class="btn-primary text-xs px-3 py-1" onclick="learnStyleNow()">一键提取当前角色风格</button>
+                        </div>
+                        <div class="p-4 border rounded-xl bg-white">
+                            <h4 class="font-bold mb-2">⚡ 主动对话</h4>
+                            <p class="text-sm text-gray-600 mb-3">基于时间/天气/待办/近期话题主动生成开场。</p>
+                            <div class="flex gap-2">
+                                <button class="btn-secondary text-xs px-3 py-1" onclick="refreshTopicSuggestion()">刷新建议</button>
+                                <button class="btn-primary text-xs px-3 py-1" onclick="triggerProactiveNow()">立即触发</button>
+                                <button class="btn-secondary text-xs px-3 py-1" onclick="triggerDailyBriefingNow()">今日通报</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="p-4 border rounded-xl bg-amber-50 border-amber-200 text-sm text-gray-700">
+                        <p class="font-bold mb-2">使用建议</p>
+                        <p>先导入记录 → 在角色页提取风格 → 再进入对话；设置页可按角色做数据导出与清理。</p>
+                    </div>
+                </div>
+
+                <!-- 聊天标签页 -->
+                <div id="chat" class="tab-content">
+                    <!-- 当前使用模型显示 -->
+                    <div class="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                        <p class="text-sm text-blue-800">
+                            <strong>🤖 当前模型:</strong> <span id="currentModel">加载中...</span>
+                        </p>
+                    </div>
+                    
+                    <!-- 聊天区域 -->
+                    <div style="height: 500px;" class="border-2 border-gray-200 rounded-xl p-4 mb-4 overflow-y-auto bg-white" id="chatBox">
+                        <div class="text-center text-gray-400 pt-20">
+                            <p class="text-2xl mb-2">欢迎来到言忆 👋</p>
+                            <p>开始与当前角色交流吧</p>
+                        </div>
+                    </div>
+                    
+                    <!-- 主动话题建议 -->
+                    <div id="topicSuggestionBar" class="mb-3 p-3 bg-yellow-50 border border-yellow-300 rounded-lg hidden" style="cursor:pointer;" onclick="useTopicSuggestion()">
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <span class="text-sm font-semibold text-yellow-800">💡 话题建议:</span>
+                                <span id="topicSuggestionText" class="text-sm text-yellow-900 ml-1"></span>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <button class="text-xs text-yellow-600 hover:text-yellow-800 underline" onclick="event.stopPropagation(); refreshTopicSuggestion()">换一个</button>
+                                <button class="text-xs text-yellow-600 hover:text-yellow-800 underline" onclick="event.stopPropagation(); generateLLMTopic()">AI生成</button>
+                                <button class="text-xs text-gray-500 hover:text-gray-700" onclick="event.stopPropagation(); hideTopicSuggestion()">✕</button>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- 输入框 -->
+                    <div class="space-y-3">
+                        <div class="flex gap-3">
+                            <input 
+                                type="text" 
+                                id="messageInput" 
+                                class="input-field flex-1"
+                                placeholder="输入你的消息..."
+                                onkeypress="handleKeyPress(event)"
+                            >
+                            <button class="btn-primary px-8" onclick="sendMessage()">发送</button>
+                        </div>
+                        
+                        <details class="text-sm">
+                            <summary class="cursor-pointer font-semibold text-gray-700 mb-2">
+                                🔧 高级选项
+                            </summary>
+                            <div class="space-y-3 mt-3 p-4 bg-gray-50 rounded-lg">
+                                <div>
+                                    <label class="block font-semibold mb-2">选择模型</label>
+                                    <select id="modelSelect" class="input-field" onchange="switchModel()">
+                                        <option value="ollama">🖥️ Ollama (本地，免费)</option>
+                                        <option value="gpt-3.5-turbo">⚡ GPT-3.5-turbo (快速)</option>
+                                        <option value="gpt-4-turbo">🔥 GPT-4-turbo (强大)</option>
+                                        <option value="deepseek-chat">🚀 DeepSeek (极快)</option>
+                                        <option value="claude-3-sonnet">✨ Claude (高质量)</option>
+                                    </select>
+                                </div>
+                                
+                                <div>
+                                    <label class="block font-semibold mb-2">回复温度: <span id="tempValue">0.7</span></label>
+                                    <input type="range" id="temperature" class="w-full" min="0" max="1" step="0.1" value="0.7" oninput="updateTempValue()">
+                                    <p class="text-xs text-gray-600">低 = 稳定可靠 | 高 = 创意发散</p>
+                                </div>
+                                
+                                <div>
+                                    <label class="block font-semibold mb-2">最大回复长度</label>
+                                    <input type="number" id="maxTokens" class="input-field" value="512" min="50" max="2000">
+                                </div>
+                                
+                                <label class="flex items-center gap-2 cursor-pointer">
+                                    <input type="checkbox" id="useMemory" checked>
+                                    <span class="font-semibold">启用长期记忆</span>
+                                </label>
+                            </div>
+                        </details>
+                    </div>
+                </div>
+                
+                <!-- 导入记录标签页 -->
+                <div id="import" class="tab-content">
+                    <div class="space-y-6">
+                        <div>
+                            <h3 class="text-lg font-bold mb-4">📱 一键导入聊天记录</h3>
+                            
+                            <div class="grid grid-cols-2 gap-4 mb-6">
+                                <div class="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center cursor-pointer hover:border-purple-500 transition" onclick="document.getElementById('wxFile').click()">
+                                    <div class="text-3xl mb-2">🔐</div>
+                                    <p class="font-semibold text-gray-700">微信记录</p>
+                                    <p class="text-sm text-gray-500">JSON 格式</p>
+                                    <input type="file" id="wxFile" accept=".json,.txt" style="display: none;" onchange="importChatRecords('weixin')">
+                                </div>
+                                
+                                <div class="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center cursor-pointer hover:border-purple-500 transition" onclick="document.getElementById('qqFile').click()">
+                                    <div class="text-3xl mb-2">👥</div>
+                                    <p class="font-semibold text-gray-700">QQ 记录</p>
+                                    <p class="text-sm text-gray-500">JSON 格式</p>
+                                    <input type="file" id="qqFile" accept=".json,.txt" style="display: none;" onchange="importChatRecords('qq')">
+                                </div>
+                            </div>
+                            
+                            <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+                                <p class="text-sm text-blue-800">
+                                    <strong>💡 提示:</strong> 支持 JSON 格式的聊天记录，可包含消息、时间戳等信息。<br>
+                                    导入后，系统会自动学习您的聊天风格和偏好。
+                                </p>
+                            </div>
+                            
+                            <details class="mb-4">
+                                <summary class="cursor-pointer font-semibold text-gray-700 mb-2">📋 了解导入格式</summary>
+                                <div class="bg-gray-100 p-4 rounded text-sm text-gray-600 mt-2">
+                                    <p class="mb-2"><strong>微信/QQ JSON 格式示例:</strong></p>
+                                    <pre class="bg-white p-3 rounded overflow-x-auto text-xs">
+{
+  "messages": [
+    {
+      "sender": "你的名字",
+    "recipient": "AI角色",
+      "content": "你在干嘛？",
+      "timestamp": "2024-01-01 10:00:00"
+    },
+    {
+    "sender": "AI角色",
+      "recipient": "你的名字",
+      "content": "我在想你呢~",
+      "timestamp": "2024-01-01 10:00:30"
+    }
+  ]
+}</pre>
+                                </div>
+                            </details>
+                            
+                            <button class="btn-primary w-full" onclick="document.getElementById('customFile').click()">
+                                📄 自定义格式导入
+                            </button>
+                            <input type="file" id="customFile" accept=".json,.txt,.csv" style="display: none;">
+                        </div>
+                        
+                        <div id="importProgress" class="hidden">
+                            <div class="mb-2 font-semibold">导入进度</div>
+                            <div class="w-full bg-gray-200 rounded-full h-2">
+                                <div id="progressBar" class="bg-gradient-to-r from-purple-600 to-pink-600 h-2 rounded-full" style="width: 0%"></div>
+                            </div>
+                            <p id="progressText" class="text-sm text-gray-600 mt-2"></p>
+                        </div>
+
+                        <!-- 已导入记录管理 -->
+                        <div class="mt-6 p-4 bg-red-50 border border-red-200 rounded-xl">
+                            <h4 class="text-md font-bold text-red-800 mb-3">🗂️ 已导入聊天记录管理</h4>
+                            <div id="importedRecordsSummary" class="text-sm text-gray-700 mb-3">
+                                <p class="text-gray-400">加载中...</p>
+                            </div>
+                            <div class="flex gap-2 flex-wrap">
+                                <button class="btn-secondary text-xs py-1.5 px-4" onclick="loadImportedSummary()">🔄 刷新统计</button>
+                                <button class="text-xs py-1.5 px-4 bg-orange-100 text-orange-700 border border-orange-300 rounded-lg hover:bg-orange-200 transition" onclick="clearImportedRecords(true)">🧹 清除当前角色记录</button>
+                                <button class="text-xs py-1.5 px-4 bg-red-100 text-red-700 border border-red-300 rounded-lg hover:bg-red-200 transition" onclick="clearImportedRecords(false)">🗑️ 清除全部记录</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 记忆库标签页 -->
+                <div id="memory" class="tab-content">
+                    <h3 class="text-lg font-bold mb-4">🧠 长期记忆库</h3>
+                    
+                    <div class="flex gap-2 mb-4">
+                        <input 
+                            type="text" 
+                            id="memorySearch"
+                            class="input-field flex-1"
+                            placeholder="搜索记忆..."
+                            oninput="searchMemories()"
+                        >
+                        <button class="btn-primary" onclick="loadMemories()">🔄 刷新</button>
+                        <button class="btn-secondary" onclick="exportChatHistory()">📥 导出</button>
+                        <button class="btn-danger" onclick="deleteChatHistory()">🗑️ 清空</button>
+                    </div>
+                    
+                    <div class="grid grid-cols-4 gap-4 mb-6">
+                        <div class="stat-card">
+                            <div class="stat-label">个性特征</div>
+                            <div class="stat-number" id="personalityCount">0</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">关系记忆</div>
+                            <div class="stat-number" id="relationshipCount">0</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">经历记录</div>
+                            <div class="stat-number" id="experienceCount">0</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">偏好习惯</div>
+                            <div class="stat-number" id="preferenceCount">0</div>
+                        </div>
+                    </div>
+                    
+                    <!-- 标签页 -->
+                    <div class="mb-4 border-b border-gray-200">
+                        <button class="px-4 py-2 font-semibold border-b-2 border-purple-600" onclick="switchMemoryView('memories')">📝 记忆库</button>
+                        <button class="px-4 py-2 font-semibold text-gray-600" onclick="switchMemoryView('history')">💬 聊天历史</button>
+                    </div>
+                    
+                    <h4 class="font-bold mb-3">最近记忆</h4>
+                    <div id="memoryList" class="space-y-2 max-h-400 overflow-y-auto">
+                        <p class="text-gray-500">加载中...</p>
+                    </div>
+                    
+                    <!-- 聊天历史 -->
+                    <div id="chatHistoryView" class="hidden">
+                        <div id="chatHistoryList" class="space-y-3 max-h-500 overflow-y-auto">
+                            <p class="text-gray-500">加载中...</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 个性化标签页 -->
+                <div id="personality" class="tab-content">
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="text-lg font-bold">🧩 角色管理</h3>
+                        <button class="btn-primary" onclick="openCharacterEditor()">＋ 新建角色</button>
+                    </div>
+                    
+                    <!-- 角色卡片列表 -->
+                    <div id="characterGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
+                        <!-- JS 动态渲染 -->
+                    </div>
+                    
+                    <!-- 角色编辑弹窗 -->
+                    <div id="charEditorModal" class="modal">
+                        <div class="modal-content" style="max-width:600px;">
+                            <h3 class="text-lg font-bold mb-4" id="charEditorTitle">新建角色</h3>
+                            <input type="hidden" id="editCharId">
+                            
+                            <div class="grid grid-cols-2 gap-4 mb-4">
+                                <div>
+                                    <label class="block font-semibold mb-1 text-sm">名字</label>
+                                    <input type="text" id="charName" class="input-field" placeholder="如: 萌萌">
+                                </div>
+                                <div>
+                                    <label class="block font-semibold mb-1 text-sm">头像Emoji</label>
+                                    <input type="text" id="charEmoji" class="input-field" placeholder="如: 💕" maxlength="4">
+                                </div>
+                                <div>
+                                    <label class="block font-semibold mb-1 text-sm">年龄</label>
+                                    <input type="text" id="charAge" class="input-field" placeholder="如: 24">
+                                </div>
+                                <div>
+                                    <label class="block font-semibold mb-1 text-sm">职业</label>
+                                    <input type="text" id="charOccupation" class="input-field" placeholder="如: 自由插画师">
+                                </div>
+                                <div>
+                                    <label class="block font-semibold mb-1 text-sm">城市</label>
+                                    <input type="text" id="charCity" class="input-field" placeholder="如: 北京">
+                                </div>
+                                <div>
+                                    <label class="block font-semibold mb-1 text-sm">文风</label>
+                                    <select id="charStyle" class="input-field" onchange="onStyleChange()">
+                                        <!-- JS 动态填充 -->
+                                    </select>
+                                </div>
+                            </div>
+                            
+                            <div class="mb-4" id="customStyleBox" style="display:none;">
+                                <label class="block font-semibold mb-1 text-sm">自定义文风描述</label>
+                                <textarea id="charStyleCustom" class="input-field" rows="3" placeholder="描述角色的说话风格..."></textarea>
+                            </div>
+                            
+                            <div class="mb-4">
+                                <label class="block font-semibold mb-1 text-sm">个性描述</label>
+                                <textarea id="charDesc" class="input-field" rows="3" placeholder="描述角色的性格特点..."></textarea>
+                            </div>
+                            <div class="mb-4">
+                                <label class="block font-semibold mb-1 text-sm">系统提示词</label>
+                                <textarea id="charPrompt" class="input-field" rows="3" placeholder="角色的系统提示词...">你是一个虚拟角色助手。</textarea>
+                            </div>
+                            
+                            <div class="flex gap-3">
+                                <button class="btn-primary flex-1" onclick="saveCharacterForm()">💾 保存</button>
+                                <button class="btn-secondary flex-1" onclick="closeCharacterEditor()">取消</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 语言风格档案 -->
+                    <div class="mt-6 p-4 bg-purple-50 border border-purple-200 rounded-xl">
+                        <div class="flex justify-between items-center mb-3">
+                            <h4 class="text-md font-bold text-purple-800">📝 语言风格档案 (从聊天记录学习)</h4>
+                            <button class="btn-primary text-xs py-1 px-3" onclick="learnStyleNow()">一键提取当前角色风格</button>
+                        </div>
+                        <div id="styleProfileContent" class="text-sm text-gray-700">
+                            <p class="text-gray-400 italic">暂无风格数据。导入聊天记录或点击“一键提取当前角色风格”后生成。</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 统计标签页 -->
+                <div id="stats" class="tab-content">
+                    <h3 class="text-lg font-bold mb-6">📊 聊天统计</h3>
+                    
+                    <div class="grid grid-cols-2 gap-4 mb-6">
+                        <div class="stat-card">
+                            <div class="stat-label">总对话数</div>
+                            <div class="stat-number" id="totalChats">0</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">用户消息数</div>
+                            <div class="stat-number" id="userMessages">0</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">AI消息数</div>
+                            <div class="stat-number" id="aiMessages">0</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">平均回复长度</div>
+                            <div class="stat-number" id="avgLength">0</div>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-6">
+                        <canvas id="statsChart"></canvas>
+                    </div>
+                    
+                    <button class="btn-secondary w-full mb-4" onclick="exportStats()">📥 导出统计数据</button>
+                </div>
+                
+                <!-- 设置标签页 -->
+                <div id="settings" class="tab-content">
+                    <h3 class="text-2xl font-bold mb-6">⚙️ 系统设置</h3>
+                    
+                    <div class="space-y-8">
+                        <!-- API 配置 -->
+                        <div class="bg-blue-50 border border-blue-200 rounded-lg p-6">
+                            <h4 class="text-lg font-bold mb-4">🔑 API 密钥配置</h4>
+                            <p class="text-sm text-gray-600 mb-4">配置 API 密钥以使用外部模型。所有密钥仅存储在浏览器本地，不会上传到服务器。</p>
+                            
+                            <div class="space-y-4">
+                                <div>
+                                    <label class="block font-semibold mb-2">🚀 DeepSeek API 密钥</label>
+                                    <input type="password" id="deepseekApiKey" class="input-field" placeholder="sk-xxxxx... (最便宜最快)" oninput="saveApiKeys()">
+                                    <p class="text-xs text-gray-500 mt-1">获取: <a href="https://platform.deepseek.com" target="_blank" class="text-blue-600">https://platform.deepseek.com</a></p>
+                                </div>
+                                
+                                <div>
+                                    <label class="block font-semibold mb-2">⚡ OpenAI API 密钥</label>
+                                    <input type="password" id="openaiApiKey" class="input-field" placeholder="sk-xxxxx... (GPT-4/3.5)" oninput="saveApiKeys()">
+                                    <p class="text-xs text-gray-500 mt-1">获取: <a href="https://platform.openai.com" target="_blank" class="text-blue-600">https://platform.openai.com</a></p>
+                                </div>
+                                
+                                <div>
+                                    <label class="block font-semibold mb-2">✨ Claude API 密钥 (可选)</label>
+                                    <input type="password" id="claudeApiKey" class="input-field" placeholder="sk-xxxxx... (Anthropic)" oninput="saveApiKeys()">
+                                    <p class="text-xs text-gray-500 mt-1">获取: <a href="https://console.anthropic.com" target="_blank" class="text-blue-600">https://console.anthropic.com</a></p>
+                                </div>
+                                
+                                <button class="btn-primary w-full" onclick="testAvailableModels()">🔍 检测可用模型</button>
+                            </div>
+                        </div>
+                        
+                        <!-- 通用设置 -->
+                        <div>
+                            <h4 class="text-lg font-bold mb-4">📋 通用设置</h4>
+                            
+                            <div class="space-y-4">
+                                <div>
+                                    <label class="block font-semibold mb-2">回复温度 (0.0 - 1.0): <span id="tempValueSettings">0.7</span></label>
+                                    <input type="range" id="temperatureSettings" class="w-full" min="0" max="1" step="0.1" value="0.7" oninput="updateTempValueSettings()">
+                                    <p class="text-sm text-gray-600">低 = 稳定可靠 | 高 = 创意发散</p>
+                                </div>
+                                
+                                <div>
+                                    <label class="block font-semibold mb-2">最大回复长度 (字符数)</label>
+                                    <input type="number" id="maxTokensSettings" class="input-field" value="512" min="50" max="2000">
+                                </div>
+                                
+                                <label class="flex items-center gap-2 cursor-pointer">
+                                    <input type="checkbox" id="useMemorySettings" checked>
+                                    <span class="font-semibold">启用长期记忆（推荐开启）</span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <!-- 每日通报待办 -->
+                        <div class="bg-amber-50 border border-amber-200 rounded-lg p-6">
+                            <h4 class="text-lg font-bold mb-2">☀️ 每日首启通报</h4>
+                            <p class="text-sm text-gray-600 mb-3">每天第一次打开时，会按这里的待办 + 当前时间 + 天气生成一条更像真人的通报消息。</p>
+                            <label class="block font-semibold mb-2 text-sm">今日待办配置（每行一个，格式：时间段|内容）</label>
+                            <textarea id="dailyTodoEditor" class="input-field" rows="5" placeholder="上午|确认今天最重要的1件事&#10;中午|喝水并短暂休息10分钟&#10;晚上|做一次简短复盘"></textarea>
+                            <p class="text-xs text-gray-500 mt-2">不写时间段也可以：直接写“完成日报”。</p>
+                            <div class="flex gap-2 mt-3 flex-wrap">
+                                <button class="btn-secondary text-xs px-3 py-1" onclick="loadDailyTodos()">🔄 重新加载</button>
+                                <button class="btn-primary text-xs px-3 py-1" onclick="saveDailyTodos()">💾 保存待办</button>
+                                <button class="btn-secondary text-xs px-3 py-1" onclick="triggerDailyBriefingNow()">📣 立即预览今日通报</button>
+                            </div>
+                        </div>
+                        
+                        <!-- 数据管理 -->
+                        <div>
+                            <h4 class="text-lg font-bold mb-4">📊 数据管理（分角色）</h4>
+                            <p class="text-sm text-gray-600 mb-3">支持按“当前角色/全部角色”范围执行统计、导出与清理，避免误删。</p>
+                            <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
+                                <div class="md:col-span-1">
+                                    <label class="block text-sm font-semibold mb-1">数据范围</label>
+                                    <select id="dataScopeSelect" class="input-field" onchange="refreshDataScopeSummary()">
+                                        <option value="current">当前角色</option>
+                                        <option value="all">全部角色</option>
+                                    </select>
+                                </div>
+                                <div class="md:col-span-2 bg-gray-50 rounded-lg p-3 text-sm" id="dataScopeSummary">加载中...</div>
+                            </div>
+
+                            <div class="flex gap-2 flex-wrap">
+                                <button class="btn-secondary" onclick="refreshDataScopeSummary()">🔄 刷新统计</button>
+                                <button class="btn-secondary" onclick="exportHistoryByScope()">📥 导出历史</button>
+                                <button class="btn-secondary" onclick="exportMemoriesData()">📥 导出记忆</button>
+                                <button class="text-xs py-2 px-4 bg-orange-100 text-orange-700 border border-orange-300 rounded-lg hover:bg-orange-200 transition" onclick="clearScopedConversations()">🧹 清理会话</button>
+                                <button class="btn-danger" onclick="clearAllServerData()">🗑️ 清空系统数据</button>
+                            </div>
+                        </div>
+                        
+                        <button class="btn-primary w-full" onclick="saveAllSettings()">💾 保存所有设置</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        const API_BASE = 'http://localhost:8000';
+        let messageHistory = [];
+        let currentModel = 'ollama';
+        let activeCharacterId = null;
+        let activeCharacterEmoji = '💝';
+        let allCharacters = [];
+        let writingStyles = {};
+        
+        // ==================== 服务健康检查 ====================
+        async function checkServiceStatus() {
+            try {
+                const response = await fetch(`${API_BASE}/health`);
+                const data = await response.json();
+                
+                const statusBar = document.getElementById('statusBar');
+                const ollamaStatus = document.getElementById('ollamaStatus');
+                
+                if (data.ollama_connected) {
+                    ollamaStatus.innerHTML = 'Ollama: <span class="font-bold text-green-600">✓ 已连接</span>';
+                    statusBar.classList.add('hidden');
+                } else {
+                    ollamaStatus.innerHTML = 'Ollama: <span class="font-bold text-red-600">✗ 未运行</span>';
+                    statusBar.classList.remove('hidden');
+                }
+            } catch (error) {
+                console.error('无法检查服务状态:', error);
+            }
+        }
+        
+        // ==================== 初始化 ====================
+        window.addEventListener('load', async () => {
+            initializeSettings();
+            // 先加载角色列表（获取 activeCharacterId 和 emoji）
+            await loadCharacters();
+            loadAvailableModels();
+            loadStats();
+            // 加载当前角色的聊天记录
+            loadPreviousMessages();
+            // 每日首次启动通报（时间/天气/待办）
+            await loadDailyBriefing(false);
+            // 加载导入记录统计 + 风格档案 + 话题建议
+            loadImportedSummary();
+            loadStyleProfile();
+            loadTopicSuggestion();
+            loadDailyTodos();
+            refreshDataScopeSummary();
+            // 检查服务状态
+            checkServiceStatus();
+            // 加载风格档案 & 主动话题建议
+            loadStyleProfile();
+            loadTopicSuggestion();
+            // 每10秒检查一次服务状态
+            setInterval(checkServiceStatus, 10000);
+        });
+        
+        // 从 localStorage 加载之前的聊天记录（按角色）
+        function loadPreviousMessages() {
+            const key = activeCharacterId ? `chatHistory_${activeCharacterId}` : 'chatHistory';
+            const stored = localStorage.getItem(key);
+            if (stored) {
+                try {
+                    messageHistory = JSON.parse(stored);
+                    // 显示加载的消息到聊天框
+                    const chatBox = document.getElementById('chatBox');
+                    chatBox.innerHTML = '';  // 清空
+                    
+                    messageHistory.forEach(msg => {
+                        const messageDiv = document.createElement('div');
+                        messageDiv.className = `chat-message message-${msg.role}`;
+                        
+                        const wrapper = document.createElement('div');
+                        wrapper.className = 'message-wrapper';
+                        
+                        const avatar = document.createElement('div');
+                        avatar.className = 'message-avatar';
+                        avatar.textContent = msg.role === 'user' ? '👤' : (activeCharacterEmoji || '💝');
+                        
+                        const contentDiv = document.createElement('div');
+                        const msgContent = document.createElement('div');
+                        msgContent.className = 'message-content';
+                        msgContent.textContent = msg.content;
+                        
+                        const timeDiv = document.createElement('div');
+                        timeDiv.className = 'message-time';
+                        timeDiv.textContent = new Date(msg.time).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+                        
+                        contentDiv.appendChild(msgContent);
+                        contentDiv.appendChild(timeDiv);
+                        
+                        wrapper.appendChild(avatar);
+                        wrapper.appendChild(contentDiv);
+                        messageDiv.appendChild(wrapper);
+                        
+                        chatBox.appendChild(messageDiv);
+                    });
+                    
+                    chatBox.scrollTop = chatBox.scrollHeight;
+                } catch (e) {
+                    console.error('加载聊天记录失败:', e);
+                }
+            }
+        }
+        
+        // 保存聊天记录到 localStorage（按角色隔离）
+        function saveChatHistory() {
+            const key = activeCharacterId ? `chatHistory_${activeCharacterId}` : 'chatHistory';
+            localStorage.setItem(key, JSON.stringify(messageHistory));
+        }
+        
+        function initializeSettings() {
+            // 从localStorage恢复设置
+            const temperature = localStorage.getItem('temperature') || '0.7';
+            const maxTokens = localStorage.getItem('maxTokens') || '512';
+            const useMemory = localStorage.getItem('useMemory') !== 'false';
+            const model = localStorage.getItem('currentModel') || 'ollama';
+            
+            document.getElementById('temperature').value = temperature;
+            document.getElementById('maxTokens').value = maxTokens;
+            document.getElementById('useMemory').checked = useMemory;
+            document.getElementById('modelSelect').value = model;
+            const headerSelect = document.getElementById('modelSelectHeader');
+            if (headerSelect) headerSelect.value = model;
+            document.getElementById('temperatureSettings').value = temperature;
+            document.getElementById('maxTokensSettings').value = maxTokens;
+            document.getElementById('useMemorySettings').checked = useMemory;
+            
+            currentModel = model;
+            updateCurrentModelDisplay();
+            
+            // 加载API密钥
+            loadApiKeys();
+        }
+
+        function goTab(tabName) {
+            const btn = Array.from(document.querySelectorAll('.tab-button')).find(x => x.getAttribute('onclick')?.includes(`'${tabName}'`));
+            switchTab(tabName, btn || null);
+        }
+        
+        async function loadAvailableModels() {
+            try {
+                const response = await fetch(`${API_BASE}/list-models`);
+                const data = await response.json();
+                
+                if (data.available_models && data.available_models.length > 0) {
+                    const availableNames = data.available_models.map(m => m.id).join(', ');
+                    document.getElementById('modelStatus').textContent = `${availableNames} (点击下拉选择)`;
+                } else {
+                    document.getElementById('modelStatus').textContent = 'Ollama';
+                }
+            } catch (error) {
+                console.error('加载模型列表失败:', error);
+                document.getElementById('modelStatus').textContent = 'Ollama';
+            }
+        }
+        
+        function switchModel() {
+            const select = document.getElementById('modelSelect');
+            currentModel = select.value;
+            const headerSelect = document.getElementById('modelSelectHeader');
+            if (headerSelect) headerSelect.value = currentModel;
+            localStorage.setItem('currentModel', currentModel);
+            updateCurrentModelDisplay();
+            showToast(`已切换到: ${select.options[select.selectedIndex].text}`);
+        }
+
+        function switchModelFromHeader() {
+            const headerSelect = document.getElementById('modelSelectHeader');
+            const modelSelect = document.getElementById('modelSelect');
+            if (!headerSelect || !modelSelect) return;
+            modelSelect.value = headerSelect.value;
+            switchModel();
+        }
+        
+        function updateCurrentModelDisplay() {
+            const modelMap = {
+                'ollama': '🏠 本地(Ollama)',
+                'deepseek-chat': '🚀 DeepSeek',
+                'gpt-3.5-turbo': '⚡ GPT-3.5-turbo',
+                'gpt-4-turbo': '⚡ GPT-4-turbo',
+                'claude-3-sonnet': '✨ Claude'
+            };
+            document.getElementById('modelStatus').textContent = modelMap[currentModel] || currentModel;
+        }
+        
+        // ==================== 标签页切换 ====================
+        function switchTab(tabName, clickedBtn = null) {
+            document.querySelectorAll('.tab-content').forEach(el => {
+                el.classList.remove('active');
+            });
+            document.querySelectorAll('.tab-button').forEach(el => {
+                el.classList.remove('active');
+            });
+            
+            document.getElementById(tabName).classList.add('active');
+            if (clickedBtn) {
+                clickedBtn.classList.add('active');
+            }
+            
+            if (tabName === 'memory') loadMemories();
+            else if (tabName === 'stats') loadStats();
+            else if (tabName === 'personality') loadPersonality();
+            else if (tabName === 'settings') refreshDataScopeSummary();
+        }
+        
+        function switchMemoryView(viewName) {
+            if (viewName === 'memories') {
+                document.getElementById('memoryList').classList.remove('hidden');
+                document.getElementById('chatHistoryView').classList.add('hidden');
+            } else {
+                document.getElementById('memoryList').classList.add('hidden');
+                document.getElementById('chatHistoryView').classList.remove('hidden');
+                loadChatHistory();
+            }
+        }
+        
+        // ==================== 模型管理 ====================
+        async function loadAvailableModels() {
+            try {
+                const response = await fetch(`${API_BASE}/list-models`);
+                if (!response.ok) throw new Error('无法加载模型列表');
+                
+                const data = await response.json();
+                document.getElementById('modelStatus').textContent = `✓ ${data.count} 个模型可用`;
+                updateCurrentModelDisplay();
+            } catch (error) {
+                document.getElementById('modelStatus').textContent = '⚠️ 无法连接到服务器';
+                console.error('加载模型列表失败:', error);
+            }
+        }
+        
+        function updateCurrentModelDisplay() {
+            const modelSelect = document.getElementById('modelSelect');
+            currentModel = modelSelect.value;
+            const headerSelect = document.getElementById('modelSelectHeader');
+            if (headerSelect) headerSelect.value = currentModel;
+            const selectedOption = modelSelect.options[modelSelect.selectedIndex];
+            document.getElementById('currentModel').textContent = selectedOption.text;
+            localStorage.setItem('currentModel', currentModel);
+        }
+        
+        async function testAvailableModels() {
+            try {
+                const response = await fetch(`${API_BASE}/list-models`);
+                const data = await response.json();
+                
+                if (data.count === 0) {
+                    showToast('❌ 没有可用的模型。请检查API密钥配置。', 'error');
+                } else {
+                    const models = data.available_models.map(m => m.info.name).join(', ');
+                    showToast(`✓ 检测到 ${data.count} 个可用模型: ${models}`, 'success');
+                }
+            } catch (error) {
+                showToast('❌ 检测失败: ' + error.message, 'error');
+            }
+        }
+        
+        // ==================== 聊天功能 ====================
+        async function sendMessage() {
+            const input = document.getElementById('messageInput');
+            const message = input.value.trim();
+            
+            if (!message) return;
+            
+            currentModel = document.getElementById('modelSelect').value;
+            addMessage(message, 'user');
+            input.value = '';
+            
+            const useMemory = document.getElementById('useMemory').checked;
+            const temperature = parseFloat(document.getElementById('temperature').value) || 0.7;
+            const maxTokens = parseInt(document.getElementById('maxTokens').value) || 512;
+
+            // 创建一个空的 AI 消息气泡用于流式填充
+            const { messageDiv, msgContent } = createStreamingBubble();
+            
+            try {
+                if (currentModel === 'ollama') {
+                    // Ollama: 使用 GET SSE 流式端点
+                    const params = new URLSearchParams({
+                        message, use_memory: useMemory, temperature, max_tokens: maxTokens
+                    });
+                    const response = await fetch(`${API_BASE}/chat/stream?${params}`);
+                    await handleSSEStream(response, msgContent, messageDiv);
+                } else {
+                    // 外部 API: 使用 POST SSE 流式端点
+                    const payload = {
+                        message, model: currentModel, use_memory: useMemory, temperature, max_tokens: maxTokens
+                    };
+                    const response = await fetch(`${API_BASE}/chat-api/stream`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                    await handleSSEStream(response, msgContent, messageDiv);
+                }
+            } catch (error) {
+                // 流式失败时回退到普通接口
+                msgContent.textContent = '';
+                messageDiv.remove();
+                await sendMessageFallback(message, useMemory, temperature, maxTokens);
+            }
+        }
+
+        // 创建流式消息气泡（空壳,等待填充）
+        function createStreamingBubble() {
+            const chatBox = document.getElementById('chatBox');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'chat-message message-ai';
+            
+            const wrapper = document.createElement('div');
+            wrapper.className = 'message-wrapper';
+            
+            const avatar = document.createElement('div');
+            avatar.className = 'message-avatar';
+            avatar.textContent = activeCharacterEmoji || '💝';
+            
+            const contentDiv = document.createElement('div');
+            const msgContent = document.createElement('div');
+            msgContent.className = 'message-content';
+            msgContent.innerHTML = '<span class="streaming-cursor">▌</span>';
+            
+            const timeDiv = document.createElement('div');
+            timeDiv.className = 'message-time';
+            timeDiv.textContent = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+            
+            contentDiv.appendChild(msgContent);
+            contentDiv.appendChild(timeDiv);
+            wrapper.appendChild(avatar);
+            wrapper.appendChild(contentDiv);
+            messageDiv.appendChild(wrapper);
+            chatBox.appendChild(messageDiv);
+            chatBox.scrollTop = chatBox.scrollHeight;
+            
+            return { messageDiv, msgContent };
+        }
+
+        // 处理 SSE 流
+        async function handleSSEStream(response, msgContent, messageDiv) {
+            if (!response.ok) {
+                const err = await response.json().catch(() => ({ detail: '流式请求失败' }));
+                throw new Error(err.detail || '请求失败');
+            }
+            
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            let fullText = '';
+            
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop(); // 保留最后一个不完整行
+                
+                for (const line of lines) {
+                    if (!line.startsWith('data: ')) continue;
+                    try {
+                        const payload = JSON.parse(line.slice(6));
+                        
+                        if (payload.type === 'chunk') {
+                            fullText += payload.content;
+                            msgContent.textContent = fullText + '▌';
+                            
+                            // 自动滚动
+                            const chatBox = document.getElementById('chatBox');
+                            chatBox.scrollTop = chatBox.scrollHeight;
+                        } else if (payload.type === 'done') {
+                            // 去掉光标，显示最终文本
+                            msgContent.textContent = payload.full_response || fullText;
+                            
+                            // 记录到历史
+                            const now = new Date();
+                            messageHistory.push({ 
+                                role: 'ai', 
+                                content: payload.full_response || fullText, 
+                                time: now.toISOString(),
+                                model: currentModel 
+                            });
+                            saveChatHistory();
+                        } else if (payload.type === 'error') {
+                            msgContent.textContent = '❌ ' + payload.message;
+                            messageDiv.querySelector('.message-avatar').textContent = '⚠️';
+                        }
+                    } catch (e) {
+                        // JSON 解析失败，忽略
+                    }
+                }
+            }
+        }
+
+        // 回退到非流式请求（当流式失败时）
+        async function sendMessageFallback(message, useMemory, temperature, maxTokens) {
+            addTypingIndicator();
+            try {
+                const endpoint = currentModel === 'ollama' ? '/chat' : '/chat-api';
+                const payload = {
+                    message, use_memory: useMemory, temperature, max_tokens: maxTokens
+                };
+                if (currentModel !== 'ollama') payload.model = currentModel;
+                
+                const response = await fetch(`${API_BASE}${endpoint}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                
+                const data = await response.json();
+                removeTypingIndicator();
+                
+                if (!response.ok) {
+                    let errorMsg = data.detail || '生成失败';
+                    if (response.status === 503 && data.detail && data.detail.includes('Ollama')) {
+                        errorMsg = '⚠️ Ollama 服务未运行\n\n请在新的命令行窗口执行:\ncmd.exe 中运行: ollama serve';
+                    }
+                    addMessage(errorMsg, 'error');
+                    return;
+                }
+                
+                const reply = data.ai_response || data.response;
+                if (reply) {
+                    addMessage(reply, 'ai');
+                } else {
+                    addMessage('❌ API 未返回有效回复', 'error');
+                }
+            } catch (error) {
+                removeTypingIndicator();
+                addMessage(`❌ 连接错误: ${error.message}`, 'error');
+            }
+        }
+        
+        function addMessage(content, role) {
+            const chatBox = document.getElementById('chatBox');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `chat-message message-${role}`;
+            
+            const wrapper = document.createElement('div');
+            wrapper.className = 'message-wrapper';
+            
+            // 头像
+            const avatar = document.createElement('div');
+            avatar.className = 'message-avatar';
+            
+            // 根据角色和内容设置头像
+            if (role === 'error') {
+                avatar.textContent = '⚠️';
+            } else if (role === 'user') {
+                avatar.textContent = '👤';
+            } else {
+                avatar.textContent = activeCharacterEmoji || '💝';
+            }
+            
+            // 内容
+            const contentDiv = document.createElement('div');
+            const msgContent = document.createElement('div');
+            msgContent.className = 'message-content';
+            msgContent.textContent = content;
+            
+            const timeDiv = document.createElement('div');
+            timeDiv.className = 'message-time';
+            timeDiv.textContent = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+            
+            contentDiv.appendChild(msgContent);
+            contentDiv.appendChild(timeDiv);
+            
+            wrapper.appendChild(avatar);
+            wrapper.appendChild(contentDiv);
+            messageDiv.appendChild(wrapper);
+            
+            chatBox.appendChild(messageDiv);
+            chatBox.scrollTop = chatBox.scrollHeight;
+            
+            // 添加到历史记录
+            const now = new Date();
+            messageHistory.push({ 
+                role, 
+                content, 
+                time: now.toISOString(),
+                model: currentModel 
+            });
+            
+            // 保存到 localStorage
+            saveChatHistory();
+        }
+        
+        function addTypingIndicator() {
+            const chatBox = document.getElementById('chatBox');
+            const indicator = document.createElement('div');
+            indicator.className = 'chat-message message-ai';
+            indicator.id = 'typingIndicator';
+            indicator.innerHTML = '<div class="typing-indicator"><div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div></div>';
+            chatBox.appendChild(indicator);
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+        
+        function removeTypingIndicator() {
+            const indicator = document.getElementById('typingIndicator');
+            if (indicator) indicator.remove();
+        }
+        
+        function handleKeyPress(event) {
+            if (event.key === 'Enter') sendMessage();
+        }
+        
+        // ==================== 记忆库功能 ====================
+        async function loadMemories() {
+            try {
+                // 使用优化的推荐端点获取高质量记忆
+                const response = await fetch(`${API_BASE}/memories/quality?limit=50&threshold=0.7`);
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    const context = data.context;
+                    
+                    // 显示统计信息
+                    document.getElementById('personalityCount').textContent = '加载中...';
+                    document.getElementById('relationshipCount').textContent = '加载中...';
+                    document.getElementById('experienceCount').textContent = '加载中...';
+                    document.getElementById('preferenceCount').textContent = '加载中...';
+                    
+                    // 解析上下文并显示
+                    const memoryList = document.getElementById('memoryList');
+                    if (memoryList) {
+                        memoryList.innerHTML = '';
+                        
+                        const memories = context.split('---').filter(m => m.trim());
+                        memories.slice(0, 10).forEach((memory) => {
+                            const item = document.createElement('div');
+                            item.className = 'memory-item';
+                            const preview = memory.substring(0, 100).trim();
+                            item.innerHTML = `
+                                <p>${preview}${preview.length > 100 ? '...' : ''}</p>
+                                <span class="memory-category">⭐ 高质量记忆</span>
+                            `;
+                            memoryList.appendChild(item);
+                        });
+                        
+                        if (memories.length === 0) {
+                            memoryList.innerHTML = '<p class="text-gray-500">暂无高质量记忆，继续聊天来积累~</p>';
+                        }
+                    }
+                }
+            } catch (error) {
+                console.error('加载记忆失败:', error);
+                document.getElementById('personalityCount').textContent = '0';
+                document.getElementById('relationshipCount').textContent = '0';
+                document.getElementById('experienceCount').textContent = '0';
+                document.getElementById('preferenceCount').textContent = '0';
+            }
+        }
+        
+        function getCategoryLabel(category) {
+            const labels = {
+                personality: '个性',
+                relationship: '关系',
+                experience: '经历',
+                preference: '偏好'
+            };
+            return labels[category] || category;
+        }
+        
+        function searchMemories() {
+            const keyword = document.getElementById('memorySearch').value;
+            if (!keyword) {
+                loadMemories();
+                return;
+            }
+            // 实现搜索逻辑
+        }
+        
+        // ==================== 文件导入功能 ====================
+        async function importChatRecords(type) {
+            try {
+                const fileInputId = type === 'weixin' ? 'wxFile' : 'qqFile';
+                const fileInput = document.getElementById(fileInputId);
+                const file = fileInput.files[0];
+                
+                if (!file) {
+                    showToast('❌ 请先选择文件', 'error');
+                    return;
+                }
+                
+                // 检查文件大小
+                const maxSize = 50 * 1024 * 1024; // 50MB
+                if (file.size > maxSize) {
+                    showToast('❌ 文件过大（超过50MB）', 'error');
+                    return;
+                }
+                
+                showToast(`⏳ 正在导入 ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)...`, 'info');
+                
+                const formData = new FormData();
+                formData.append('file', file);
+                
+                const response = await fetch(`${API_BASE}/import-chat/${type}`, {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    showToast(`✅ 导入成功！已导入 ${data.imported_count} 条对话对`, 'success');
+                    
+                    // 重新加载统计信息
+                    setTimeout(() => {
+                        loadStats();
+                        loadMemories();
+                        loadImportedSummary();
+                        loadStyleProfile();
+                    }, 1000);
+                    
+                    // 清空文件输入
+                    fileInput.value = '';
+                } else {
+                    showToast(`❌ 导入失败: ${data.detail || '未知错误'}`, 'error');
+                }
+            } catch (error) {
+                console.error('导入错误:', error);
+                showToast(`❌ 导入异常: ${error.message}`, 'error');
+            }
+        }
+
+        // ==================== 已导入记录管理 ====================
+        async function loadImportedSummary() {
+            try {
+                // 加载全部和当前角色的统计
+                const [allResp, charResp] = await Promise.all([
+                    fetch(`${API_BASE}/admin/conversation-summary`),
+                    fetch(`${API_BASE}/admin/conversation-summary?character_id=${activeCharacterId || 'default'}`)
+                ]);
+                const allData = await allResp.json();
+                const charData = await charResp.json();
+
+                const container = document.getElementById('importedRecordsSummary');
+                if (!container) return;
+
+                const allTotal = allData.total || 0;
+                const charTotal = charData.total || 0;
+
+                let html = `<div class="grid grid-cols-2 gap-3">`;
+                html += `<div class="bg-white rounded p-2"><span class="font-semibold text-red-700">📊 全部记录:</span> <strong>${allTotal}</strong> 条</div>`;
+                html += `<div class="bg-white rounded p-2"><span class="font-semibold text-red-700">👤 当前角色:</span> <strong>${charTotal}</strong> 条</div>`;
+                if (allData.earliest) {
+                    html += `<div class="bg-white rounded p-2 col-span-2 text-xs text-gray-500">⏱️ 时间范围: ${(allData.earliest||'').slice(0,10)} ~ ${(allData.latest||'').slice(0,10)}</div>`;
+                }
+                html += `</div>`;
+                container.innerHTML = html;
+            } catch (e) {
+                console.error('加载记录统计失败:', e);
+            }
+        }
+
+        async function clearImportedRecords(currentCharOnly) {
+            const target = currentCharOnly ? '当前角色' : '全部';
+            const count = document.querySelector('#importedRecordsSummary strong');
+            const msg = `⚠️ 确定要清除【${target}】的所有导入聊天记录吗？\n\n此操作不可撤销！清除后需要重新导入聊天记录。`;
+            if (!confirm(msg)) return;
+            if (!confirm(`再次确认：真的要删除${target}的聊天记录吗？`)) return;
+
+            try {
+                const params = new URLSearchParams({ confirm: 'true' });
+                if (currentCharOnly && activeCharacterId) {
+                    params.set('character_id', activeCharacterId);
+                }
+                const resp = await fetch(`${API_BASE}/admin/clear-conversations?${params}`, { method: 'DELETE' });
+                const data = await resp.json();
+
+                if (data.status === 'success') {
+                    showToast(`✅ 已清除 ${data.deleted_count} 条记录`, 'success');
+                    loadImportedSummary();
+                    loadStats();
+                } else {
+                    showToast('❌ 清除失败', 'error');
+                }
+            } catch (e) {
+                showToast('❌ 请求失败: ' + e.message, 'error');
+            }
+        }
+        
+        // ==================== 聊天历史功能 ====================
+        async function loadChatHistory() {
+            try {
+                const response = await fetch(`${API_BASE}/history?limit=50`);
+                const data = await response.json();
+                
+                const list = document.getElementById('chatHistoryList');
+                list.innerHTML = '';
+                
+                if (data.conversations && data.conversations.length === 0) {
+                    list.innerHTML = '<p class="text-gray-500">暂无聊天记录</p>';
+                    return;
+                }
+                
+                // 显示本地消息历史
+                if (messageHistory.length === 0) {
+                    list.innerHTML = '<p class="text-gray-500">本轮对话暂无记录</p>';
+                    return;
+                }
+                
+                messageHistory.forEach((msg, idx) => {
+                    const item = document.createElement('div');
+                    item.className = 'memory-item';
+                    const time = new Date(msg.time).toLocaleString('zh-CN');
+                    const modelInfo = msg.model ? ` [${msg.model}]` : '';
+                    item.innerHTML = `
+                        <div class="flex justify-between items-start">
+                            <div class="flex-1">
+                                <p><strong>${msg.role === 'user' ? '👤 你' : '💝 AI'}:</strong> ${msg.content.substring(0, 100)}...</p>
+                                <span class="memory-category">${time}${modelInfo}</span>
+                            </div>
+                            <button class="memory-delete-btn" onclick="deleteLocalMessage(${idx})">删除</button>
+                        </div>
+                    `;
+                    list.appendChild(item);
+                });
+            } catch (error) {
+                console.error('加载聊天历史失败:', error);
+            }
+        }
+        
+        function deleteLocalMessage(index) {
+            if (confirm('确定删除这条记录吗？')) {
+                messageHistory.splice(index, 1);
+                saveChatHistory();
+                loadChatHistory();
+                showToast('✓ 已删除', 'success');
+            }
+        }
+        
+        function exportLocalChatHistory() {
+            try {
+                // 导出本地聊天记录
+                const txtContent = messageHistory.map((msg, idx) => {
+                    const time = new Date(msg.time).toLocaleString('zh-CN');
+                    const role = msg.role === 'user' ? '👤 我' : '💝 AI';
+                    return `[${time}] ${role}: ${msg.content}`;
+                }).join('\n\n');
+                
+                const blob = new Blob([txtContent], { type: 'text/plain;charset=utf-8' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `chat-export-${new Date().getTime()}.txt`;
+                a.click();
+                URL.revokeObjectURL(url);
+                
+                showToast('✓ 聊天记录已导出为TXT', 'success');
+            } catch (error) {
+                showToast('❌ 导出失败: ' + error.message, 'error');
+            }
+        }
+        
+        function clearLocalChatHistory() {
+            if (confirm('确定要清空本轮所有聊天记录吗？此操作不可撤销！')) {
+                messageHistory = [];
+                saveChatHistory();
+                document.getElementById('chatBox').innerHTML = '';
+                showToast('✓ 已清空聊天记录', 'success');
+            }
+        }
+        
+        // ==================== 角色管理 ====================
+        async function loadCharacters() {
+            try {
+                const [charRes, styleRes] = await Promise.all([
+                    fetch(`${API_BASE}/characters`),
+                    fetch(`${API_BASE}/writing-styles`)
+                ]);
+                const charData = await charRes.json();
+                const styleData = await styleRes.json();
+                
+                allCharacters = charData.characters || [];
+                activeCharacterId = charData.active_id;
+                writingStyles = styleData.styles || {};
+                
+                // 找到当前角色的 emoji
+                const active = allCharacters.find(c => c.id === activeCharacterId);
+                if (active) activeCharacterEmoji = active.avatar_emoji || '💝';
+                
+                renderCharacterBar();
+                renderCharacterGrid();
+            } catch (e) {
+                console.error('加载角色列表失败:', e);
+            }
+        }
+        
+        function renderCharacterBar() {
+            const bar = document.getElementById('characterBar');
+            if (!bar) return;
+            bar.innerHTML = '';
+            allCharacters.forEach(c => {
+                const pill = document.createElement('button');
+                pill.className = 'char-pill' + (c.id === activeCharacterId ? ' active' : '');
+                pill.innerHTML = `${c.avatar_emoji || '💕'} ${c.name}`;
+                pill.onclick = () => switchCharacter(c.id);
+                bar.appendChild(pill);
+            });
+        }
+        
+        function renderCharacterGrid() {
+            const grid = document.getElementById('characterGrid');
+            if (!grid) return;
+            grid.innerHTML = '';
+            if (allCharacters.length === 0) {
+                grid.innerHTML = '<p class="text-gray-500 col-span-3 text-center py-10">暂无角色，点击"＋ 新建角色"创建</p>';
+                return;
+            }
+            allCharacters.forEach(c => {
+                const isActive = c.id === activeCharacterId;
+                const styleName = c.writing_style || '未设置';
+                const card = document.createElement('div');
+                card.className = 'char-card' + (isActive ? ' active-card' : '');
+                card.innerHTML = `
+                    ${isActive ? '<span class="card-badge">当前使用</span>' : ''}
+                    <div class="flex items-center gap-3 mb-3">
+                        <span class="text-3xl">${c.avatar_emoji || '💕'}</span>
+                        <div>
+                            <div class="font-bold text-lg">${c.name}</div>
+                            <div class="text-sm text-gray-500">${c.age ? c.age + '岁' : ''} ${c.occupation || ''}</div>
+                        </div>
+                    </div>
+                    <div class="text-sm text-gray-600 mb-2">${c.description || '暂无描述'}</div>
+                    <div class="text-xs mb-3"><span class="bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full">🖊️ ${styleName}</span> <span class="bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full ml-1">📍 ${c.city || '未知'}</span></div>
+                    <div class="flex gap-2">
+                        ${isActive ? '<button class="btn-secondary text-xs px-3 py-1" disabled>✓ 已激活</button>' : `<button class="btn-primary text-xs px-3 py-1" onclick="switchCharacter('${c.id}')">切换</button>`}
+                        <button class="btn-secondary text-xs px-3 py-1" onclick="editCharacter('${c.id}')">编辑</button>
+                        <button class="btn-secondary text-xs px-3 py-1 text-red-500" onclick="deleteCharacter('${c.id}','${c.name}')">删除</button>
+                    </div>
+                `;
+                grid.appendChild(card);
+            });
+        }
+        
+        async function switchCharacter(charId) {
+            try {
+                const res = await fetch(`${API_BASE}/characters/${charId}/activate`, { method: 'POST' });
+                if (!res.ok) throw new Error('切换失败');
+                const data = await res.json();
+                activeCharacterId = charId;
+                const active = allCharacters.find(c => c.id === charId);
+                if (active) activeCharacterEmoji = active.avatar_emoji || '💝';
+                renderCharacterBar();
+                renderCharacterGrid();
+                
+                // 加载该角色的聊天记录
+                loadCharacterChatHistory(charId);
+                
+                // 刷新风格档案和话题建议
+                loadStyleProfile();
+                loadTopicSuggestion();
+                refreshDataScopeSummary();
+                
+                showToast(`✓ 已切换到: ${data.active_name}`, 'success');
+            } catch (e) {
+                showToast('切换角色失败: ' + e.message, 'error');
+            }
+        }
+        
+        function loadCharacterChatHistory(charId) {
+            // 保存当前角色的聊天记录
+            saveChatHistory();
+            
+            // 加载新角色的聊天记录
+            const key = `chatHistory_${charId}`;
+            const stored = localStorage.getItem(key);
+            messageHistory = stored ? JSON.parse(stored) : [];
+            
+            // 重新渲染聊天框
+            const chatBox = document.getElementById('chatBox');
+            chatBox.innerHTML = '';
+            if (messageHistory.length === 0) {
+                const active = allCharacters.find(c => c.id === charId);
+                const name = active ? active.name : 'AI';
+                chatBox.innerHTML = `<div class="text-center text-gray-400 pt-20"><p class="text-2xl mb-2">与 ${name} 的聊天 👋</p><p>开始对话吧~</p></div>`;
+                return;
+            }
+            messageHistory.forEach(msg => {
+                const messageDiv = document.createElement('div');
+                messageDiv.className = `chat-message message-${msg.role}`;
+                const wrapper = document.createElement('div');
+                wrapper.className = 'message-wrapper';
+                const avatar = document.createElement('div');
+                avatar.className = 'message-avatar';
+                avatar.textContent = msg.role === 'user' ? '👤' : (activeCharacterEmoji || '💝');
+                const contentDiv = document.createElement('div');
+                const msgContent = document.createElement('div');
+                msgContent.className = 'message-content';
+                msgContent.textContent = msg.content;
+                const timeDiv = document.createElement('div');
+                timeDiv.className = 'message-time';
+                timeDiv.textContent = new Date(msg.time).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+                contentDiv.appendChild(msgContent);
+                contentDiv.appendChild(timeDiv);
+                wrapper.appendChild(avatar);
+                wrapper.appendChild(contentDiv);
+                messageDiv.appendChild(wrapper);
+                chatBox.appendChild(messageDiv);
+            });
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+        
+        // 编辑器操作
+        function openCharacterEditor(charData) {
+            const modal = document.getElementById('charEditorModal');
+            document.getElementById('charEditorTitle').textContent = charData ? '编辑角色' : '新建角色';
+            document.getElementById('editCharId').value = charData ? charData.id : '';
+            document.getElementById('charName').value = charData ? charData.name : '';
+            document.getElementById('charEmoji').value = charData ? (charData.avatar_emoji || '💕') : '💕';
+            document.getElementById('charAge').value = charData ? charData.age : '';
+            document.getElementById('charOccupation').value = charData ? charData.occupation : '';
+            document.getElementById('charCity').value = charData ? charData.city : '';
+            document.getElementById('charDesc').value = charData ? charData.description : '';
+            document.getElementById('charPrompt').value = charData ? charData.system_prompt : '你是一个虚拟角色助手。';
+            document.getElementById('charStyleCustom').value = charData ? (charData.writing_style_custom || '') : '';
+            
+            // 填充文风选择
+            const styleSelect = document.getElementById('charStyle');
+            styleSelect.innerHTML = '';
+            Object.entries(writingStyles).forEach(([key, val]) => {
+                const opt = document.createElement('option');
+                opt.value = key;
+                opt.textContent = `${val.label} - ${val.description}`;
+                styleSelect.appendChild(opt);
+            });
+            if (charData && charData.writing_style) styleSelect.value = charData.writing_style;
+            onStyleChange();
+            
+            modal.classList.add('show');
+        }
+        
+        function closeCharacterEditor() {
+            document.getElementById('charEditorModal').classList.remove('show');
+        }
+        
+        function onStyleChange() {
+            const val = document.getElementById('charStyle').value;
+            document.getElementById('customStyleBox').style.display = val === '自定义' ? 'block' : 'none';
+        }
+        
+        async function editCharacter(charId) {
+            const c = allCharacters.find(x => x.id === charId);
+            if (c) openCharacterEditor(c);
+        }
+        
+        async function saveCharacterForm() {
+            const charId = document.getElementById('editCharId').value;
+            const payload = {
+                name: document.getElementById('charName').value || '新角色',
+                avatar_emoji: document.getElementById('charEmoji').value || '💕',
+                age: document.getElementById('charAge').value,
+                occupation: document.getElementById('charOccupation').value,
+                city: document.getElementById('charCity').value,
+                description: document.getElementById('charDesc').value,
+                system_prompt: document.getElementById('charPrompt').value,
+                writing_style: document.getElementById('charStyle').value,
+                writing_style_custom: document.getElementById('charStyleCustom').value
+            };
+            
+            try {
+                let res;
+                if (charId) {
+                    res = await fetch(`${API_BASE}/characters/${charId}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                } else {
+                    res = await fetch(`${API_BASE}/characters`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                }
+                if (!res.ok) throw new Error('保存失败');
+                closeCharacterEditor();
+                await loadCharacters();
+                showToast('✓ 角色已保存', 'success');
+            } catch (e) {
+                showToast('保存失败: ' + e.message, 'error');
+            }
+        }
+        
+        async function deleteCharacter(charId, name) {
+            if (!confirm(`确定删除角色 "${name}" 吗？聊天记录也会被清除。`)) return;
+            try {
+                const res = await fetch(`${API_BASE}/characters/${charId}`, { method: 'DELETE' });
+                if (!res.ok) throw new Error('删除失败');
+                localStorage.removeItem(`chatHistory_${charId}`);
+                await loadCharacters();
+                showToast(`✓ 角色 "${name}" 已删除`, 'success');
+            } catch (e) {
+                showToast('删除失败: ' + e.message, 'error');
+            }
+        }
+        
+        // 兼容旧接口
+        async function loadPersonality() {
+            await loadCharacters();
+        }
+        async function savePersonality() {
+            // 兼容 - 不再使用
+        }
+        
+        // ==================== 统计功能 ====================
+        async function loadStats() {
+            try {
+                // 使用优化的统计端点提升性能
+                const response = await fetch(`${API_BASE}/stats/optimized`);
+                if (!response.ok) {
+                    // 降级到旧的端点
+                    const fallback = await fetch(`${API_BASE}/stats`);
+                    const data = await fallback.json();
+                    updateStatsDisplay(data);
+                } else {
+                    const data = await response.json();
+                    updateStatsDisplay(data);
+                }
+            } catch (error) {
+                console.error('加载统计信息失败:', error);
+            }
+        }
+        
+        function updateStatsDisplay(data) {
+            document.getElementById('totalChats').textContent = data.total_conversations || 0;
+            document.getElementById('userMessages').textContent = data.user_messages || data.total_conversations || 0;
+            document.getElementById('aiMessages').textContent = data.ai_messages || data.total_conversations || 0;
+            document.getElementById('avgLength').textContent = (data.avg_response_length || data.average_quality * 100 || 0).toFixed(0);
+        }
+        
+        // 旧版本 (已废弃)
+        // async function loadStats() {
+        //     try {
+        //         const response = await fetch(`${API_BASE}/stats`);
+        //         if (!response.ok) return;
+        //         
+        //         const data = await response.json();
+        //         document.getElementById('totalChats').textContent = data.total_conversations || 0;
+        //         document.getElementById('userMessages').textContent = data.user_messages || 0;
+        //         document.getElementById('aiMessages').textContent = data.ai_messages || 0;
+        //         document.getElementById('avgLength').textContent = (data.avg_response_length || 0).toFixed(0);
+        //     } catch (error) {
+        //         console.error('加载统计信息失败:', error);
+        //     }
+        // }
+        
+        // ==================== API密钥管理 ====================
+        function saveApiKeys() {
+            localStorage.setItem('deepseekApiKey', document.getElementById('deepseekApiKey').value);
+            localStorage.setItem('openaiApiKey', document.getElementById('openaiApiKey').value);
+            localStorage.setItem('claudeApiKey', document.getElementById('claudeApiKey').value);
+            showToast('✓ API 密钥已保存到本地浏览器', 'success');
+        }
+        
+        function loadApiKeys() {
+            document.getElementById('deepseekApiKey').value = localStorage.getItem('deepseekApiKey') || '';
+            document.getElementById('openaiApiKey').value = localStorage.getItem('openaiApiKey') || '';
+            document.getElementById('claudeApiKey').value = localStorage.getItem('claudeApiKey') || '';
+        }
+        
+        // ==================== 设置管理 ====================
+        function updateTempValue() {
+            document.getElementById('tempValue').textContent = document.getElementById('temperature').value;
+        }
+        
+        function updateTempValueSettings() {
+            document.getElementById('tempValueSettings').textContent = document.getElementById('temperatureSettings').value;
+        }
+        
+        function saveAllSettings() {
+            localStorage.setItem('temperature', document.getElementById('temperatureSettings').value);
+            localStorage.setItem('maxTokens', document.getElementById('maxTokensSettings').value);
+            localStorage.setItem('useMemory', document.getElementById('useMemorySettings').checked);
+            
+            // 同步到聊天页面
+            document.getElementById('temperature').value = document.getElementById('temperatureSettings').value;
+            document.getElementById('maxTokens').value = document.getElementById('maxTokensSettings').value;
+            document.getElementById('useMemory').checked = document.getElementById('useMemorySettings').checked;
+            
+            showToast('✓ 所有设置已保存！', 'success');
+        }
+        
+        function exportDb() {
+            const data = {
+                messageHistory: messageHistory,
+                exportTime: new Date().toISOString()
+            };
+            const jsonStr = JSON.stringify(data, null, 2);
+            const blob = new Blob([jsonStr], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `backup-${new Date().getTime()}.json`;
+            a.click();
+            URL.revokeObjectURL(url);
+            showToast('✓ 数据已导出', 'success');
+        }
+        
+        function clearAllData() {
+            if (confirm('确定要清空所有数据吗？此操作不可撤销！')) {
+                messageHistory = [];
+                document.getElementById('chatBox').innerHTML = '';
+                localStorage.clear();
+                showToast('✓ 所有数据已清空', 'success');
+            }
+        }
+
+        function getDataScopeParams() {
+            const scope = document.getElementById('dataScopeSelect')?.value || 'current';
+            if (scope === 'all') {
+                return { scope: 'all', characterId: null };
+            }
+            return { scope: 'current', characterId: activeCharacterId || 'default' };
+        }
+
+        async function refreshDataScopeSummary() {
+            try {
+                const summaryEl = document.getElementById('dataScopeSummary');
+                if (!summaryEl) return;
+                const { scope, characterId } = getDataScopeParams();
+                const url = scope === 'all'
+                    ? `${API_BASE}/admin/conversation-summary`
+                    : `${API_BASE}/admin/conversation-summary?character_id=${encodeURIComponent(characterId)}`;
+                const resp = await fetch(url);
+                const data = await resp.json();
+                const total = data.total || 0;
+                const earliest = (data.earliest || '').slice(0, 19) || '-';
+                const latest = (data.latest || '').slice(0, 19) || '-';
+                summaryEl.innerHTML = `
+                    <div><strong>范围:</strong> ${scope === 'all' ? '全部角色' : `当前角色 (${characterId})`}</div>
+                    <div><strong>记录数:</strong> ${total}</div>
+                    <div><strong>时间:</strong> ${earliest} ~ ${latest}</div>
+                `;
+            } catch (e) {
+                console.error('加载范围统计失败:', e);
+            }
+        }
+
+        async function clearScopedConversations() {
+            const { scope, characterId } = getDataScopeParams();
+            const targetText = scope === 'all' ? '全部角色' : `当前角色(${characterId})`;
+            if (!confirm(`确定清理 ${targetText} 的会话记录吗？`)) return;
+
+            try {
+                const params = new URLSearchParams({ confirm: 'true' });
+                if (scope !== 'all') params.set('character_id', characterId);
+                const resp = await fetch(`${API_BASE}/admin/clear-conversations?${params.toString()}`, { method: 'DELETE' });
+                const data = await resp.json();
+                if (data.status === 'success') {
+                    showToast(`✓ 已清理 ${data.deleted_count} 条记录`, 'success');
+                    refreshDataScopeSummary();
+                    loadImportedSummary();
+                    loadStats();
+                } else {
+                    showToast('❌ 清理失败', 'error');
+                }
+            } catch (e) {
+                showToast('❌ 清理异常: ' + e.message, 'error');
+            }
+        }
+
+        async function exportHistoryByScope() {
+            try {
+                const { scope, characterId } = getDataScopeParams();
+                const url = scope === 'all'
+                    ? `${API_BASE}/history?limit=10000`
+                    : `${API_BASE}/history?limit=10000&character_id=${encodeURIComponent(characterId)}`;
+                const resp = await fetch(url);
+                const data = await resp.json();
+                const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json;charset=utf-8' });
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = `yanyi-history-${scope}-${new Date().getTime()}.json`;
+                a.click();
+                URL.revokeObjectURL(a.href);
+                showToast('✓ 历史导出成功', 'success');
+            } catch (e) {
+                showToast('❌ 历史导出失败: ' + e.message, 'error');
+            }
+        }
+
+        async function exportMemoriesData() {
+            try {
+                window.open(`${API_BASE}/export/memories`, '_blank');
+                showToast('✓ 记忆导出已触发', 'success');
+            } catch (e) {
+                showToast('❌ 记忆导出失败: ' + e.message, 'error');
+            }
+        }
+
+        async function clearAllServerData() {
+            if (!confirm('⚠️ 该操作会清空系统数据库全部数据，是否继续？')) return;
+            if (!confirm('请再次确认：该操作不可撤销。')) return;
+            try {
+                const resp = await fetch(`${API_BASE}/admin/clear?confirm=true`, { method: 'POST' });
+                const data = await resp.json();
+                if (data.status === 'success') {
+                    showToast('✓ 系统数据已清空', 'success');
+                    messageHistory = [];
+                    saveChatHistory();
+                    loadImportedSummary();
+                    refreshDataScopeSummary();
+                    loadStats();
+                    loadMemories();
+                } else {
+                    showToast('❌ 清空失败', 'error');
+                }
+            } catch (e) {
+                showToast('❌ 清空异常: ' + e.message, 'error');
+            }
+        }
+
+        async function triggerProactiveNow() {
+            try {
+                const cid = activeCharacterId || 'default';
+                const resp = await fetch(`${API_BASE}/topic/proactive/trigger?character_id=${encodeURIComponent(cid)}&force=true`, {
+                    method: 'POST'
+                });
+                const data = await resp.json();
+                if (data.status === 'success' && data.message) {
+                    document.getElementById('messageInput').value = data.message;
+                    showToast('✓ 已生成主动对话，可直接发送', 'success');
+                } else {
+                    showToast('❌ 主动触发失败', 'error');
+                }
+            } catch (e) {
+                showToast('❌ 主动触发异常: ' + e.message, 'error');
+            }
+        }
+
+        async function loadDailyBriefing(force = false) {
+            try {
+                const cid = activeCharacterId || 'default';
+                const resp = await fetch(`${API_BASE}/daily/briefing?character_id=${encodeURIComponent(cid)}&force=${force ? 'true' : 'false'}`);
+                const data = await resp.json();
+                if (data.status === 'success' && data.sent && data.message) {
+                    addMessage(data.message, 'ai');
+                    showToast('☀️ 今日通报已送达', 'success');
+                }
+            } catch (e) {
+                console.log('每日通报加载失败:', e);
+            }
+        }
+
+        async function triggerDailyBriefingNow() {
+            await loadDailyBriefing(true);
+        }
+
+        async function loadDailyTodos() {
+            try {
+                const resp = await fetch(`${API_BASE}/daily/todos`);
+                const data = await resp.json();
+                const editor = document.getElementById('dailyTodoEditor');
+                if (!editor) return;
+
+                if (data.status === 'success' && Array.isArray(data.todos)) {
+                    const lines = data.todos.map(item => {
+                        const hint = (item.time_hint || '').trim();
+                        const title = (item.title || '').trim();
+                        return hint ? `${hint}|${title}` : title;
+                    });
+                    editor.value = lines.join('\n');
+                }
+            } catch (e) {
+                console.log('加载每日待办失败:', e);
+            }
+        }
+
+        async function saveDailyTodos() {
+            const editor = document.getElementById('dailyTodoEditor');
+            if (!editor) return;
+
+            const lines = editor.value
+                .split('\n')
+                .map(s => s.trim())
+                .filter(Boolean);
+
+            const todos = lines.map(line => {
+                if (line.includes('|')) {
+                    const [timeHint, ...rest] = line.split('|');
+                    return {
+                        title: rest.join('|').trim(),
+                        time_hint: timeHint.trim(),
+                        enabled: true,
+                        weekdays: []
+                    };
+                }
+                return {
+                    title: line,
+                    time_hint: '',
+                    enabled: true,
+                    weekdays: []
+                };
+            }).filter(item => item.title);
+
+            if (!todos.length) {
+                showToast('❌ 请至少填写一条待办', 'error');
+                return;
+            }
+
+            try {
+                const resp = await fetch(`${API_BASE}/daily/todos`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ todos })
+                });
+                const data = await resp.json();
+                if (data.status === 'success') {
+                    showToast('✓ 每日待办已保存', 'success');
+                } else {
+                    showToast('❌ 保存失败', 'error');
+                }
+            } catch (e) {
+                showToast('❌ 保存异常: ' + e.message, 'error');
+            }
+        }
+        
+        // ==================== 工具函数 ====================
+        function showToast(message, type = 'info') {
+            const toast = document.createElement('div');
+            toast.className = 'toast';
+            toast.textContent = message;
+            
+            if (type === 'success') {
+                toast.style.borderLeft = '4px solid #4CAF50';
+                toast.style.color = '#4CAF50';
+            } else if (type === 'error') {
+                toast.style.borderLeft = '4px solid #f44336';
+                toast.style.color = '#f44336';
+            }
+            
+            document.body.appendChild(toast);
+            setTimeout(() => toast.remove(), 3000);
+        }
+
+        // ==================== 语言风格档案 ====================
+        async function loadStyleProfile() {
+            try {
+                const cid = activeCharacterId || 'default';
+                const resp = await fetch(`${API_BASE}/style/profile?character_id=${cid}`);
+                const data = await resp.json();
+                const container = document.getElementById('styleProfileContent');
+                if (!container) return;
+
+                if (data.status !== 'success' || !data.profile || data.profile.sample_count === 0) {
+                    container.innerHTML = '<p class="text-gray-400 italic">暂无风格数据。导入聊天记录或点击“一键提取当前角色风格”后生成。</p>';
+                    return;
+                }
+
+                const p = data.profile;
+                let html = `<div class="grid grid-cols-2 gap-3 mb-3">`;
+                html += `<div class="bg-white rounded p-2"><span class="font-semibold text-purple-700">📊 样本数:</span> ${p.sample_count}</div>`;
+                html += `<div class="bg-white rounded p-2"><span class="font-semibold text-purple-700">📏 平均长度:</span> ${p.avg_length?.toFixed(1) || 0} 字</div>`;
+                html += `<div class="bg-white rounded p-2"><span class="font-semibold text-purple-700">❓ 提问率:</span> ${(p.question_ratio * 100).toFixed(1)}%</div>`;
+                html += `<div class="bg-white rounded p-2"><span class="font-semibold text-purple-700">❗ 感叹率:</span> ${(p.exclamation_ratio * 100).toFixed(1)}%</div>`;
+                html += `<div class="bg-white rounded p-2"><span class="font-semibold text-purple-700">🥰 撒娇度:</span> ${(p.flirt_level * 100).toFixed(0)}%</div>`;
+                html += `<div class="bg-white rounded p-2"><span class="font-semibold text-purple-700">😆 幽默度:</span> ${(p.humor_level * 100).toFixed(0)}%</div>`;
+                html += `</div>`;
+
+                if (p.catchphrases && p.catchphrases.length > 0) {
+                    html += `<div class="mb-2"><span class="font-semibold text-purple-700">💬 口头禅:</span> ${p.catchphrases.map(c => `<span class="inline-block bg-purple-100 text-purple-800 px-2 py-0.5 rounded-full text-xs mr-1 mb-1">${c}</span>`).join('')}</div>`;
+                }
+                if (p.emoji_habits && p.emoji_habits.length > 0) {
+                    html += `<div class="mb-2"><span class="font-semibold text-purple-700">😊 常用表情:</span> ${p.emoji_habits.join(' ')}</div>`;
+                }
+                if (p.tone_particles && Object.keys(p.tone_particles).length > 0) {
+                    const sorted = Object.entries(p.tone_particles).sort((a,b) => b[1] - a[1]).slice(0, 8);
+                    html += `<div class="mb-2"><span class="font-semibold text-purple-700">🗣️ 语气词:</span> ${sorted.map(([w,c]) => `<span class="inline-block bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full text-xs mr-1">${w}(${c})</span>`).join('')}</div>`;
+                }
+
+                if (data.prompt_preview) {
+                    html += `<details class="mt-3"><summary class="cursor-pointer text-xs text-purple-600 font-semibold">查看注入到AI的风格提示词</summary>`;
+                    html += `<pre class="mt-1 p-2 bg-white text-xs rounded overflow-x-auto whitespace-pre-wrap">${data.prompt_preview}</pre></details>`;
+                }
+
+                container.innerHTML = html;
+            } catch (e) {
+                console.error('加载风格档案失败:', e);
+            }
+        }
+
+        async function learnStyleNow() {
+            showToast('⏳ 正在学习语言风格...', 'info');
+            try {
+                const cid = activeCharacterId || 'default';
+                const resp = await fetch(`${API_BASE}/style/learn?character_id=${cid}`, { method: 'POST' });
+                const data = await resp.json();
+                if (data.status === 'success') {
+                    showToast(`✓ 风格学习完成！分析了 ${data.sample_count} 条记录`, 'success');
+                    loadStyleProfile();
+                } else {
+                    showToast('❌ 学习失败', 'error');
+                }
+            } catch (e) {
+                showToast('❌ 学习请求失败: ' + e.message, 'error');
+            }
+        }
+
+        // ==================== 主动话题建议 ====================
+        let currentTopicSuggestion = '';
+
+        async function loadTopicSuggestion() {
+            try {
+                const cid = activeCharacterId || 'default';
+                const resp = await fetch(`${API_BASE}/topic/suggest?character_id=${cid}`);
+                const data = await resp.json();
+                if (data.status === 'success' && data.topic) {
+                    currentTopicSuggestion = data.topic;
+                    document.getElementById('topicSuggestionText').textContent = data.topic;
+                    document.getElementById('topicSuggestionBar').classList.remove('hidden');
+                }
+            } catch (e) {
+                console.log('话题建议加载失败:', e);
+            }
+        }
+
+        async function refreshTopicSuggestion() {
+            await loadTopicSuggestion();
+        }
+
+        async function generateLLMTopic() {
+            showToast('⏳ AI正在思考话题...', 'info');
+            try {
+                const cid = activeCharacterId || 'default';
+                const resp = await fetch(`${API_BASE}/topic/suggest?character_id=${cid}&use_llm=true`);
+                const data = await resp.json();
+                if (data.status === 'success' && data.topic) {
+                    currentTopicSuggestion = data.topic;
+                    document.getElementById('topicSuggestionText').textContent = data.topic;
+                    document.getElementById('topicSuggestionBar').classList.remove('hidden');
+                    showToast('✓ AI话题已生成', 'success');
+                }
+            } catch (e) {
+                showToast('❌ 生成失败', 'error');
+            }
+        }
+
+        function useTopicSuggestion() {
+            if (currentTopicSuggestion) {
+                document.getElementById('messageInput').value = currentTopicSuggestion;
+                document.getElementById('topicSuggestionBar').classList.add('hidden');
+                document.getElementById('messageInput').focus();
+            }
+        }
+
+        function hideTopicSuggestion() {
+            document.getElementById('topicSuggestionBar').classList.add('hidden');
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,20 @@
+[
+  {
+    "title": "确认今天最重要的1件事",
+    "time_hint": "上午",
+    "enabled": true,
+    "weekdays": []
+  },
+  {
+    "title": "中午喝水并短暂休息 10 分钟",
+    "time_hint": "中午",
+    "enabled": true,
+    "weekdays": []
+  },
+  {
+    "title": "晚上做一次简短复盘",
+    "time_hint": "晚上",
+    "enabled": true,
+    "weekdays": []
+  }
+]
