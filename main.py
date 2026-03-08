@@ -30,8 +30,6 @@ from style_learner import StyleLearner
 from topic_initiator import topic_initiator, get_time_context
 from intent_classifier import intent_classifier
 from daily_briefing import daily_briefing_manager
-from emotion_tracker import emotion_tracker
-from response_enhancer import response_enhancer
 
 
 logging.basicConfig(
@@ -167,17 +165,11 @@ async def chat(request: ChatRequest):
         if not chat_manager.ollama.check_connection():
             raise HTTPException(status_code=503, detail="Ollama 未运行，请先执行 ollama serve")
 
-        # 只在用户显式设置非默认值时传入，否则两ChatManager的意图动态调参生效
-        kwargs = {}
-        if request.temperature != 0.7:
-            kwargs['temperature'] = request.temperature
-        if request.max_tokens != 512:
-            kwargs['num_predict'] = request.max_tokens
-
         response = chat_manager.chat(
             request.message,
             use_memory=request.use_memory,
-            **kwargs,
+            temperature=request.temperature,
+            num_predict=request.max_tokens,
         )
         if not response:
             raise HTTPException(status_code=503, detail="本地模型未返回内容")
@@ -201,16 +193,11 @@ async def chat_stream(message: str, use_memory: bool = True, temperature: float 
     def generate():
         parts = []
         try:
-            kwargs = {}
-            if temperature != 0.7:
-                kwargs['temperature'] = temperature
-            if max_tokens != 512:
-                kwargs['num_predict'] = max_tokens
-
             for chunk in chat_manager.chat_stream(
                 message,
                 use_memory=use_memory,
-                **kwargs,
+                temperature=temperature,
+                num_predict=max_tokens,
             ):
                 parts.append(chunk)
                 payload = json.dumps({"type": "chunk", "content": chunk}, ensure_ascii=False)
@@ -246,32 +233,20 @@ async def list_models():
 async def chat_with_api(request: ChatAPIRequest):
     try:
         intent_result = intent_classifier.detect(request.message)
-        # 意图动态调参
-        dynamic = response_enhancer.get_dynamic_params(intent_result.intent)
-        temperature = request.temperature if request.temperature != 0.7 else dynamic.get('temperature', 0.7)
-        max_tokens = request.max_tokens if request.max_tokens != 512 else dynamic.get('max_tokens', 512)
-
         context_parts = [memory_manager.get_intent_context(request.message)]
-        # 情绪上下文
-        cid = character_manager.get_active_id()
-        context_parts.append(emotion_tracker.build_emotion_context(request.message, character_id=cid))
         if request.use_memory:
             context_parts.insert(0, memory_manager.get_memory_context())
         context = "\n".join([c for c in context_parts if c])
 
-        raw_response = await model_manager.generate(
+        response = await model_manager.generate(
             message=request.message,
             model_name=request.model,
             context=context,
-            temperature=temperature,
-            max_tokens=max_tokens,
+            temperature=request.temperature,
+            max_tokens=request.max_tokens,
         )
-        if not raw_response:
+        if not response:
             raise HTTPException(status_code=500, detail="外部模型返回空响应")
-
-        # 回复增强
-        enhanced = response_enhancer.enhance(raw_response)
-        response = enhanced.text or raw_response
 
         active_id = character_manager.get_active_id()
         db.add_conversation_pair(
@@ -281,19 +256,16 @@ async def chat_with_api(request: ChatAPIRequest):
                 f"intent:{intent_result.intent}",
                 f"intent_conf:{intent_result.confidence:.2f}",
             ],
-            quality_score=enhanced.quality_score,
+            quality_score=0.8,
             character_id=active_id,
         )
         character_manager.add_chat_message(active_id, request.message, response)
-        emotion_tracker.record(request.message, character_id=active_id)
 
         return {
             "status": "success",
             "user_message": request.message,
             "ai_response": response,
             "model_used": request.model,
-            "intent": intent_result.intent,
-            "quality_score": enhanced.quality_score,
             "timestamp": datetime.now().isoformat(),
             "message_count": db.get_conversation_count(),
         }
@@ -309,72 +281,46 @@ async def chat_api_stream(request: ChatAPIRequest):
     async def generate():
         try:
             intent_result = intent_classifier.detect(request.message)
-            # 意图动态调参
-            dynamic = response_enhancer.get_dynamic_params(intent_result.intent)
-            temperature = request.temperature if request.temperature != 0.7 else dynamic.get('temperature', 0.7)
-            max_tokens = request.max_tokens if request.max_tokens != 512 else dynamic.get('max_tokens', 512)
-
             context_parts = [memory_manager.get_intent_context(request.message)]
-            # 情绪上下文
-            cid = character_manager.get_active_id()
-            context_parts.append(emotion_tracker.build_emotion_context(request.message, character_id=cid))
             if request.use_memory:
                 context_parts.insert(0, memory_manager.get_memory_context())
             context = "\n".join([c for c in context_parts if c])
 
-            # 真正的 SSE 流式生成
-            full_parts = []
-            stream_filter = response_enhancer.create_stream_filter()
-            async for chunk in model_manager.generate_stream(
+            response = await model_manager.generate(
                 message=request.message,
                 model_name=request.model,
                 context=context,
-                temperature=temperature,
-                max_tokens=max_tokens,
-            ):
-                filtered = stream_filter(chunk)
-                if filtered:
-                    full_parts.append(filtered)
-                    payload = json.dumps({"type": "chunk", "content": filtered}, ensure_ascii=False)
-                    yield f"data: {payload}\n\n"
-
-            full_response = "".join(full_parts)
-            if not full_response:
+                temperature=request.temperature,
+                max_tokens=request.max_tokens,
+            )
+            if not response:
                 payload = json.dumps({"type": "error", "message": "模型返回空响应"}, ensure_ascii=False)
                 yield f"data: {payload}\n\n"
                 return
 
-            # 增强 + 保存
-            enhanced = response_enhancer.enhance(full_response)
-            save_text = enhanced.text or full_response
-
             active_id = character_manager.get_active_id()
             db.add_conversation_pair(
                 user_message=request.message,
-                ai_response=save_text,
+                ai_response=response,
                 context_tags=[
                     f"intent:{intent_result.intent}",
                     f"intent_conf:{intent_result.confidence:.2f}",
                 ],
-                quality_score=enhanced.quality_score,
+                quality_score=0.8,
                 character_id=active_id,
             )
-            character_manager.add_chat_message(active_id, request.message, save_text)
-            emotion_tracker.record(request.message, character_id=active_id)
+            character_manager.add_chat_message(active_id, request.message, response)
+
+            for char in response:
+                payload = json.dumps({"type": "chunk", "content": char}, ensure_ascii=False)
+                yield f"data: {payload}\n\n"
 
             done = json.dumps(
-                {
-                    "type": "done",
-                    "full_response": save_text,
-                    "message_count": db.get_conversation_count(),
-                    "quality_score": enhanced.quality_score,
-                    "intent": intent_result.intent,
-                },
+                {"type": "done", "full_response": response, "message_count": db.get_conversation_count()},
                 ensure_ascii=False,
             )
             yield f"data: {done}\n\n"
         except Exception as exc:
-            logger.exception("/chat-api/stream 错误")
             err = json.dumps({"type": "error", "message": str(exc)}, ensure_ascii=False)
             yield f"data: {err}\n\n"
 
@@ -480,11 +426,17 @@ async def get_memory_context():
 @app.get("/memory/all")
 async def get_all_memories(category: str = None, limit: int = 50):
     if category:
-        memories = db.get_memories_by_category(category)[:limit]
+        memories = [
+            {**m, "category": category}
+            for m in db.get_memories_by_category(category)[:limit]
+        ]
     else:
         memories = []
-        for cat in ["personality", "relationship", "experience", "preference", "important_info"]:
-            memories.extend(db.get_memories_by_category(cat)[:10])
+        categories = ["personality", "relationship", "experience", "preference", "important_info"]
+        per_cat = max(5, limit // len(categories))
+        for cat in categories:
+            cat_memories = db.get_memories_by_category(cat)[:per_cat]
+            memories.extend([{**m, "category": cat} for m in cat_memories])
     return {"total": len(memories), "memories": memories}
 
 
@@ -603,41 +555,6 @@ async def get_daily_briefing(character_id: str = None, force: bool = False, pers
         "status": "success",
         "character_id": active_id,
         **briefing,
-    }
-
-
-# ==================== 情绪曲线 API ====================
-@app.get("/emotion/current")
-async def get_current_emotion(text: str = "", character_id: str = None):
-    """分析文本情绪（不记录）"""
-    pt = emotion_tracker.analyze(text)
-    return {
-        "status": "success",
-        "valence": pt.valence,
-        "arousal": pt.arousal,
-        "emotion": pt.dominant_emotion,
-    }
-
-
-@app.get("/emotion/trend")
-async def get_emotion_trend(window: int = 10, character_id: str = None):
-    """获取情绪趋势"""
-    cid = character_id or character_manager.get_active_id()
-    trend = emotion_tracker.get_trend(window=window, character_id=cid)
-    return {"status": "success", "character_id": cid, **trend}
-
-
-@app.get("/emotion/curve")
-async def get_emotion_curve(days: int = 7, character_id: str = None):
-    """获取情绪曲线数据（供前端绘图）"""
-    cid = character_id or character_manager.get_active_id()
-    data = emotion_tracker.get_curve_data(days=days, character_id=cid)
-    return {
-        "status": "success",
-        "character_id": cid,
-        "days": days,
-        "points": data,
-        "count": len(data),
     }
 
 

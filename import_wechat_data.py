@@ -129,7 +129,7 @@ if __name__ == '__main__':
         print("\n使用方法:")
         print(f"  python {sys.argv[0]} <JSON文件路径>")
         print(f"\n例子:")
-        print(f"  python {sys.argv[0]} messages_wxid_xxxxx.json")
+        print(f"  python {sys.argv[0]} messages_wxid_1eiij51yvreg22.json")
         sys.exit(1)
     
     file_path = sys.argv[1]

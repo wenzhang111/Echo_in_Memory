@@ -17,6 +17,7 @@ set "PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple"
 set "HF_ENDPOINT=https://hf-mirror.com"
 set "OLLAMA_FORCE_GPU=1"
 set "OLLAMA_NUM_GPU=999"
+set "DEEPSEEK_API_KEY="
 
 echo [1/7] 检查 Python...
 where python >nul 2>&1
@@ -153,7 +154,7 @@ if "!OLLAMA_FORCE_GPU!"=="1" (
 )
 
 echo [6/7] 启动 FastAPI...
-start "Yanyi-FastAPI" /D "%~dp0" cmd /K "call venv\Scripts\activate.bat && set OLLAMA_MODEL=!OLLAMA_MODEL! && set OLLAMA_FORCE_GPU=!OLLAMA_FORCE_GPU! && set OLLAMA_NUM_GPU=!OLLAMA_NUM_GPU! && set HF_ENDPOINT=!HF_ENDPOINT! && python run_server.py"
+start "Yanyi-FastAPI" /D "%~dp0" cmd /K "call venv\Scripts\activate.bat && set OLLAMA_MODEL=!OLLAMA_MODEL! && set OLLAMA_FORCE_GPU=!OLLAMA_FORCE_GPU! && set OLLAMA_NUM_GPU=!OLLAMA_NUM_GPU! && set HF_ENDPOINT=!HF_ENDPOINT! && set DEEPSEEK_API_KEY= && python run_server.py"
 
 set /a API_WAIT_MAX=45
 set /a API_WAIT_COUNT=0

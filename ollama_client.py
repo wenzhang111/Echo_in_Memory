@@ -32,6 +32,7 @@ class OllamaClient:
         self.api_url = api_url
         self.model = model
         self.timeout = OLLAMA_TIMEOUT
+        self._last_connection_ok: Optional[bool] = None
     
     def check_connection(self) -> bool:
         """检查Ollama服务连接"""
@@ -41,12 +42,18 @@ class OllamaClient:
                 timeout=5
             )
             if response.status_code == 200:
-                logger.info("✓ Ollama服务已连接")
+                if self._last_connection_ok is not True:
+                    logger.info("✓ Ollama服务已连接")
+                self._last_connection_ok = True
                 return True
             else:
-                logger.warning(f"✗ Ollama 返回状态码: {response.status_code}")
+                if self._last_connection_ok is not False:
+                    logger.warning(f"✗ Ollama 返回状态码: {response.status_code}")
+                self._last_connection_ok = False
         except Exception as e:
-            logger.error(f"✗ 无法连接到Ollama: {e}")
+            if self._last_connection_ok is not False:
+                logger.error(f"✗ 无法连接到Ollama: {e}")
+            self._last_connection_ok = False
             return False
         
         return False
@@ -65,6 +72,21 @@ class OllamaClient:
             logger.error(f"获取模型列表失败: {e}")
         
         return []
+
+    def _ensure_model_available(self) -> bool:
+        """确保当前模型可用，不可用时自动切换到首个可用模型。"""
+        models = self.get_available_models()
+        if not models:
+            logger.error("❌ 未检测到任何本地模型，请先运行: ollama pull <模型名>")
+            return False
+
+        if self.model in models:
+            return True
+
+        old_model = self.model
+        self.model = models[0]
+        logger.warning(f"⚠️ 配置模型不存在: {old_model}，已自动切换为: {self.model}")
+        return True
     
     def generate(
         self,
@@ -82,6 +104,9 @@ class OllamaClient:
         # 快速检查 Ollama 连接（5秒超时）
         if not self.check_connection():
             logger.error("Ollama 服务未运行，无法生成回复")
+            return None
+
+        if not self._ensure_model_available():
             return None
             
         try:
@@ -111,6 +136,15 @@ class OllamaClient:
             if response.status_code == 200:
                 result = response.json()
                 return result.get('response', '').strip()
+            elif response.status_code == 404:
+                logger.error(f"❌ 模型不存在: {self.model}")
+                if self._ensure_model_available():
+                    payload["model"] = self.model
+                    retry_resp = requests.post(self.api_url, json=payload, timeout=self.timeout)
+                    if retry_resp.status_code == 200:
+                        return retry_resp.json().get('response', '').strip()
+                logger.error("   请运行: ollama pull <模型名>")
+                return None
             else:
                 logger.error(f"Ollama API错误: {response.status_code}")
                 return None
@@ -135,6 +169,13 @@ class OllamaClient:
         实时返回生成的文本片段，低端GPU优化版本
         """
         try:
+            if not self.check_connection():
+                logger.error("Ollama 服务未运行，无法进行流式生成")
+                return
+
+            if not self._ensure_model_available():
+                return
+
             payload = {
                 "model": self.model,
                 "prompt": prompt,
@@ -170,8 +211,21 @@ class OllamaClient:
                             continue
             elif response.status_code == 404:
                 logger.error(f"❌ 模型不存在: {self.model}")
-                logger.error(f"   请运行: ollama pull {self.model}")
-                logger.error(f"   或使用其他模型: ollama pull qwen2:1b")
+                if self._ensure_model_available():
+                    payload["model"] = self.model
+                    retry_resp = requests.post(self.api_url, json=payload, timeout=self.timeout, stream=True)
+                    if retry_resp.status_code == 200:
+                        for line in retry_resp.iter_lines():
+                            if line:
+                                try:
+                                    data = json.loads(line)
+                                    chunk = data.get('response', '')
+                                    if chunk:
+                                        yield chunk
+                                except json.JSONDecodeError:
+                                    continue
+                        return
+                logger.error("   请运行: ollama pull <模型名>")
             else:
                 logger.error(f"Ollama API错误: {response.status_code} - {response.text[:200]}")
         
@@ -225,125 +279,24 @@ class OllamaClient:
         
         yield from self.generate_stream(full_prompt, **kwargs)
 
-    # ──────────────────────────────────────────
-    # /api/chat 结构化多轮对话接口
-    # ──────────────────────────────────────────
-    def chat_completion(
-        self,
-        messages: List[Dict[str, str]],
-        temperature: float = OLLAMA_TEMPERATURE,
-        top_p: float = OLLAMA_TOP_P,
-        top_k: int = GENERATION_TOP_K,
-        num_predict: int = GENERATION_NUM_PREDICT,
-    ) -> Optional[str]:
-        """
-        使用 /api/chat 进行结构化多轮对话（非流式）。
-        messages: [{"role": "system"/"user"/"assistant", "content": "..."}]
-        """
-        chat_url = self.api_url.replace('/api/generate', '/api/chat')
-        payload = {
-            "model": self.model,
-            "messages": messages,
-            "stream": False,
-            "options": {
-                "temperature": temperature,
-                "top_p": top_p,
-                "top_k": top_k,
-                "num_predict": num_predict,
-                "repeat_penalty": GENERATION_REPEAT_PENALTY,
-            },
-        }
-        if OLLAMA_FORCE_GPU:
-            payload["options"]["num_gpu"] = OLLAMA_NUM_GPU
-
-        try:
-            response = requests.post(chat_url, json=payload, timeout=self.timeout)
-            if response.status_code == 200:
-                result = response.json()
-                return result.get('message', {}).get('content', '').strip()
-            else:
-                logger.error(f"Ollama /api/chat 错误: {response.status_code} - {response.text[:200]}")
-                return None
-        except requests.Timeout:
-            logger.error(f"Chat 请求超时 ({self.timeout}秒)")
-            return None
-        except Exception as e:
-            logger.error(f"Chat 生成失败: {e}")
-            return None
-
-    def chat_completion_stream(
-        self,
-        messages: List[Dict[str, str]],
-        temperature: float = OLLAMA_TEMPERATURE,
-        top_p: float = OLLAMA_TOP_P,
-        top_k: int = GENERATION_TOP_K,
-        num_predict: int = GENERATION_NUM_PREDICT,
-    ) -> Iterator[str]:
-        """
-        使用 /api/chat 进行流式多轮对话。
-        """
-        chat_url = self.api_url.replace('/api/generate', '/api/chat')
-        payload = {
-            "model": self.model,
-            "messages": messages,
-            "stream": True,
-            "options": {
-                "temperature": temperature,
-                "top_p": top_p,
-                "top_k": top_k,
-                "num_predict": num_predict,
-                "repeat_penalty": GENERATION_REPEAT_PENALTY,
-            },
-        }
-        if OLLAMA_FORCE_GPU:
-            payload["options"]["num_gpu"] = OLLAMA_NUM_GPU
-
-        try:
-            response = requests.post(
-                chat_url, json=payload, timeout=self.timeout, stream=True
-            )
-            if response.status_code == 200:
-                for line in response.iter_lines():
-                    if line:
-                        try:
-                            data = json.loads(line)
-                            chunk = data.get('message', {}).get('content', '')
-                            if chunk:
-                                yield chunk
-                        except json.JSONDecodeError:
-                            continue
-            elif response.status_code == 404:
-                logger.error(f"❌ 模型不存在或不支持 /api/chat: {self.model}")
-            else:
-                logger.error(f"Ollama chat stream 错误: {response.status_code}")
-        except requests.Timeout:
-            logger.error(f"Chat 流式请求超时 ({self.timeout}秒)")
-        except Exception as e:
-            logger.error(f"Chat 流式生成失败: {e}")
-
 
 class ChatManager:
     """
-    聊天管理器 (v2)
-    使用 /api/chat 结构化多轮对话，集成：
-    - context_engine: Token预算管理 + 结构化messages
-    - emotion_tracker: 情绪曲线追踪
-    - response_enhancer: 回复质量增强 + 意图动态调参
+    聊天管理器
+    整合Ollama、记忆系统和数据库
     """
-
+    
     def __init__(self):
         self.ollama = OllamaClient()
         self.conversation_history = []
-
+        
+        # 检查Ollama连接（失败时仅警告，不影响模块初始化）
         try:
             if not self.ollama.check_connection():
                 logger.warning("⚠️ Ollama连接失败，请确保Ollama服务正在运行")
         except Exception as e:
             logger.warning(f"⚠️ 无法检查Ollama连接: {str(e)}")
-
-    # ──────────────────────────────────────────
-    #  核心对话方法
-    # ──────────────────────────────────────────
+    
     def chat(
         self,
         user_input: str,
@@ -352,52 +305,31 @@ class ChatManager:
         **kwargs
     ) -> Optional[str]:
         """
-        进行一次聊天交互（非流式）。
-        自动使用意图动态调参 + 结构化messages + 回复增强。
+        进行一次聊天交互
+        
+        Args:
+            user_input: 用户输入
+            use_memory: 是否使用记忆系统
+            stream: 是否使用流式生成
         """
         if stream:
             return self.chat_stream(user_input, use_memory, **kwargs)
-
-        # 1) 意图检测 → 动态生成参数
-        intent_result = intent_classifier.detect(user_input)
-        dynamic = response_enhancer.get_dynamic_params(intent_result.intent)
-        # 合并：动态参数为基础，显式传入的 kwargs 覆盖
-        gen_params = {
-            'temperature': dynamic.get('temperature', OLLAMA_TEMPERATURE),
-            'num_predict': dynamic.get('max_tokens', GENERATION_NUM_PREDICT),
-            'top_p': dynamic.get('top_p', OLLAMA_TOP_P),
-        }
-        for k in ('temperature', 'num_predict', 'top_p', 'top_k'):
-            if k in kwargs:
-                gen_params[k] = kwargs[k]
-
-        # 2) 构建结构化 messages → /api/chat
+        
+        # 构建带记忆的上下文
         if use_memory:
-            messages = self._build_messages(user_input)
-            raw_response = self.ollama.chat_completion(messages, **gen_params)
+            full_prompt = memory_prompt_builder.build_full_context(user_input)
         else:
-            raw_response = self.ollama.generate(user_input, **gen_params)
-
-        if not raw_response:
-            return None
-
-        # 3) 回复增强管线
-        enhanced = response_enhancer.enhance(raw_response)
-        response = enhanced.text or raw_response
-        if enhanced.was_cleaned:
-            logger.info(f"🔧 回复已增强: {enhanced.cleaning_notes}")
-
-        # 4) 记录情绪
-        try:
-            cid = self._get_active_id()
-            emotion_tracker.record(user_input, character_id=cid)
-        except Exception as e:
-            logger.debug(f"情绪记录失败: {e}")
-
-        # 5) 保存
-        self._save_conversation_pair(user_input, response)
+            full_prompt = user_input
+        
+        # 调用Ollama生成回复
+        response = self.ollama.generate(full_prompt, **kwargs)
+        
+        if response:
+            # 存储对话对到数据库
+            self._save_conversation_pair(user_input, response)
+        
         return response
-
+    
     def chat_stream(
         self,
         user_input: str,
@@ -405,98 +337,24 @@ class ChatManager:
         **kwargs
     ) -> Iterator[str]:
         """
-        流式聊天交互。
-        实时过滤 <think> 标签，完成后增强并保存。
+        流式聊天交互
         """
-        # 意图动态调参
-        intent_result = intent_classifier.detect(user_input)
-        dynamic = response_enhancer.get_dynamic_params(intent_result.intent)
-        gen_params = {
-            'temperature': dynamic.get('temperature', OLLAMA_TEMPERATURE),
-            'num_predict': dynamic.get('max_tokens', GENERATION_NUM_PREDICT),
-            'top_p': dynamic.get('top_p', OLLAMA_TOP_P),
-        }
-        for k in ('temperature', 'num_predict', 'top_p', 'top_k'):
-            if k in kwargs:
-                gen_params[k] = kwargs[k]
-
-        # 构建 messages
+        # 构建带记忆的上下文
         if use_memory:
-            messages = self._build_messages(user_input)
-            raw_stream = self.ollama.chat_completion_stream(messages, **gen_params)
+            full_prompt = memory_prompt_builder.build_full_context(user_input)
         else:
-            raw_stream = self.ollama.generate_stream(user_input, **gen_params)
-
-        # 流式过滤 <think> 标签
-        stream_filter = response_enhancer.create_stream_filter()
+            full_prompt = user_input
+        
+        # 流式生成
         response_parts = []
-        raw_parts = []
-        for chunk in raw_stream:
-            raw_parts.append(chunk)
-            filtered = stream_filter(chunk)
-            if filtered:
-                response_parts.append(filtered)
-                yield filtered
-
-        # 流式结束后：增强完整文本用于存储
-        if raw_parts:
-            raw_full = ''.join(raw_parts)
-            enhanced = response_enhancer.enhance(raw_full)
-            # 记录情绪
-            try:
-                cid = self._get_active_id()
-                emotion_tracker.record(user_input, character_id=cid)
-            except Exception:
-                pass
-            self._save_conversation_pair(user_input, enhanced.text or raw_full)
-
-    # ──────────────────────────────────────────
-    #  构建结构化 messages
-    # ──────────────────────────────────────────
-    def _build_messages(self, user_input: str) -> List[Dict[str, str]]:
-        """使用 context_engine 构建 Token 预算内的结构化 messages。"""
-        # 系统提示词（角色设定 + 性格 + 记忆）
-        system_prompt = memory_prompt_builder.build_system_prompt_with_memory()
-        # 意图上下文
-        intent_context = memory_manager.get_intent_context(user_input)
-        # 情绪上下文
-        cid = self._get_active_id()
-        emotion_context = emotion_tracker.build_emotion_context(user_input, character_id=cid)
-
-        # 近期对话历史 → 结构化 user/assistant 消息
-        recent_pairs = db.get_recent_conversations(
-            num_pairs=CONTEXT_WINDOW, character_id=cid
-        )
-        history: List[Dict[str, str]] = []
-        for user_msg, ai_msg in reversed(recent_pairs):  # oldest first
-            if user_msg:
-                history.append({"role": "user", "content": user_msg})
-            if ai_msg:
-                history.append({"role": "assistant", "content": ai_msg})
-
-        # RAG 语义检索
-        rag_results = []
-        try:
-            rag_results = rag_system.search_relevant_conversations(user_input, top_k=3)
-        except Exception:
-            pass
-
-        return context_engine.build_messages(
-            system_prompt=system_prompt,
-            intent_context=intent_context,
-            emotion_context=emotion_context,
-            conversation_history=history,
-            rag_results=rag_results,
-            user_input=user_input,
-        )
-
-    @staticmethod
-    def _get_active_id() -> str:
-        try:
-            from character_manager import character_manager
-            return character_manager.get_active_id()
-        except Exception:
-            return "default"
+        for chunk in self.ollama.generate_stream(full_prompt, **kwargs):
+            response_parts.append(chunk)
+            yield chunk
+        
+        # 保存完整的对话
+        if response_parts:
+            full_response = ''.join(response_parts)
+            self._save_conversation_pair(user_input, full_response)
     
     def _save_conversation_pair(self, user_input: str, ai_response: str):
         """保存对话对到数据库（关联当前角色）"""

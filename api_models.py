@@ -1,12 +1,8 @@
 """
-多模型API支持模块 (v2)
+多模型API支持模块
 支持 OpenAI, DeepSeek, Claude, 以及本地 Ollama
 
-提供统一的接口进行 API 调用，包含：
-- 真正的 SSE 流式响应
-- 多轮对话历史注入
-- 意图动态调参
-- 回复增强管线
+提供统一的接口进行 API 调用
 """
 import sys
 from pathlib import Path
@@ -15,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import os
 import logging
 from abc import ABC, abstractmethod
-from typing import Optional, List, AsyncIterator
+from typing import Optional, List
 import asyncio
 import httpx
 import json
@@ -32,24 +28,6 @@ def get_dynamic_system_prompt() -> str:
     except Exception as e:
         logger.warning(f"获取角色提示词失败，使用默认: {e}")
         return "你是一个温柔体贴的女友，风格温暖亲切，适当调皮。"
-
-
-def _get_conversation_history(limit: int = 5) -> List[dict]:
-    """获取近期对话历史，格式化为 messages 数组。"""
-    try:
-        from database import db
-        from character_manager import character_manager
-        cid = character_manager.get_active_id()
-        pairs = db.get_recent_conversations(num_pairs=limit, character_id=cid)
-        messages = []
-        for user_msg, ai_msg in reversed(pairs):
-            if user_msg:
-                messages.append({"role": "user", "content": user_msg})
-            if ai_msg:
-                messages.append({"role": "assistant", "content": ai_msg})
-        return messages
-    except Exception:
-        return []
 
 class BaseAPIModel(ABC):
     """所有模型的基类"""
@@ -68,17 +46,6 @@ class BaseAPIModel(ABC):
     ) -> str:
         """生成回复"""
         pass
-
-    async def generate_stream(
-        self,
-        message: str,
-        context: str = "",
-        temperature: float = 0.7,
-        max_tokens: int = 512,
-    ) -> AsyncIterator[str]:
-        """流式生成回复（默认 fallback 到非流式）"""
-        result = await self.generate(message, context, temperature, max_tokens)
-        yield result
     
     @abstractmethod
     def is_available(self) -> bool:
@@ -134,14 +101,12 @@ class OpenAIModel(BaseAPIModel):
             "Content-Type": "application/json"
         }
         
-        # 构建多轮消息（含历史）
-        messages = [{"role": "system", "content": system_prompt}]
-        messages.extend(_get_conversation_history(limit=5))
-        messages.append({"role": "user", "content": message})
-        
         payload = {
             "model": self.model_name,
-            "messages": messages,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": message}
+            ],
             "temperature": temperature,
             "max_tokens": max_tokens
         }
@@ -180,57 +145,6 @@ class OpenAIModel(BaseAPIModel):
         except (json.JSONDecodeError, KeyError, AttributeError) as e:
             logger.error(f"❌ OpenAI 响应解析失败: {type(e).__name__}: {str(e)}")
             raise ValueError(f"服务器响应格式错误: {str(e)}")
-
-    async def generate_stream(
-        self,
-        message: str,
-        context: str = "",
-        temperature: float = 0.7,
-        max_tokens: int = 512,
-    ) -> AsyncIterator[str]:
-        """OpenAI 真正的 SSE 流式生成"""
-        if not self.is_available():
-            raise ValueError("OpenAI API 密钥未配置")
-
-        system_prompt = get_dynamic_system_prompt()
-        if context:
-            system_prompt += f"\n参考背景信息:\n{context}"
-
-        msgs = [{"role": "system", "content": system_prompt}]
-        msgs.extend(_get_conversation_history(limit=5))
-        msgs.append({"role": "user", "content": message})
-
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-        }
-        payload = {
-            "model": self.model_name,
-            "messages": msgs,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "stream": True,
-        }
-        try:
-            async with httpx.AsyncClient(timeout=60) as client:
-                async with client.stream("POST", self.api_base, json=payload, headers=headers) as resp:
-                    resp.raise_for_status()
-                    async for line in resp.aiter_lines():
-                        if not line.startswith("data: "):
-                            continue
-                        data_str = line[6:]
-                        if data_str.strip() == "[DONE]":
-                            break
-                        try:
-                            obj = json.loads(data_str)
-                            delta = obj["choices"][0].get("delta", {}).get("content", "")
-                            if delta:
-                                yield delta
-                        except (json.JSONDecodeError, KeyError, IndexError):
-                            continue
-        except Exception as e:
-            logger.error(f"❌ OpenAI stream 错误: {e}")
-            raise ValueError(f"OpenAI 流式生成失败: {e}")
 
 
 class DeepSeekModel(BaseAPIModel):
@@ -276,14 +190,12 @@ class DeepSeekModel(BaseAPIModel):
             "Content-Type": "application/json"
         }
         
-        # 构建多轮消息（含历史）
-        msgs = [{"role": "system", "content": system_prompt}]
-        msgs.extend(_get_conversation_history(limit=5))
-        msgs.append({"role": "user", "content": message})
-
         payload = {
             "model": self.model_name,
-            "messages": msgs,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": message}
+            ],
             "temperature": temperature,
             "max_tokens": max_tokens
         }
@@ -296,6 +208,7 @@ class DeepSeekModel(BaseAPIModel):
                 
                 data = response.json()
                 
+                # 检查响应格式
                 if "choices" not in data or not data["choices"]:
                     logger.error(f"❌ DeepSeek 响应格式错误: {data}")
                     raise KeyError("Invalid response structure: no choices")
@@ -303,13 +216,14 @@ class DeepSeekModel(BaseAPIModel):
                 reply = data["choices"][0].get("message", {}).get("content", "").strip()
                 
                 if not reply:
+                    logger.error(f"❌ DeepSeek 返回空内容")
                     raise ValueError("API 返回空回复")
                 
                 logger.info(f"✓ DeepSeek 生成成功 ({len(reply)} 字符)")
                 return reply
                 
         except httpx.TimeoutException:
-            logger.error("❌ DeepSeek 超时")
+            logger.error("❌ DeepSeek 超时（30秒内无响应）")
             raise ValueError("API 请求超时，请稍后重试")
         except httpx.HTTPStatusError as e:
             logger.error(f"❌ DeepSeek HTTP 错误 {e.response.status_code}: {e.response.text}")
@@ -320,57 +234,6 @@ class DeepSeekModel(BaseAPIModel):
         except (json.JSONDecodeError, KeyError, AttributeError) as e:
             logger.error(f"❌ DeepSeek 响应解析失败: {type(e).__name__}: {str(e)}")
             raise ValueError(f"服务器响应格式错误: {str(e)}")
-
-    async def generate_stream(
-        self,
-        message: str,
-        context: str = "",
-        temperature: float = 0.7,
-        max_tokens: int = 512,
-    ) -> AsyncIterator[str]:
-        """DeepSeek 真正的 SSE 流式生成（OpenAI 兼容格式）"""
-        if not self.is_available():
-            raise ValueError("DeepSeek API 密钥未配置")
-
-        system_prompt = get_dynamic_system_prompt()
-        if context:
-            system_prompt += f"\n参考背景信息:\n{context}"
-
-        msgs = [{"role": "system", "content": system_prompt}]
-        msgs.extend(_get_conversation_history(limit=5))
-        msgs.append({"role": "user", "content": message})
-
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-        }
-        payload = {
-            "model": self.model_name,
-            "messages": msgs,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "stream": True,
-        }
-        try:
-            async with httpx.AsyncClient(timeout=90) as client:
-                async with client.stream("POST", self.api_base, json=payload, headers=headers) as resp:
-                    resp.raise_for_status()
-                    async for line in resp.aiter_lines():
-                        if not line.startswith("data: "):
-                            continue
-                        data_str = line[6:]
-                        if data_str.strip() == "[DONE]":
-                            break
-                        try:
-                            obj = json.loads(data_str)
-                            delta = obj["choices"][0].get("delta", {}).get("content", "")
-                            if delta:
-                                yield delta
-                        except (json.JSONDecodeError, KeyError, IndexError):
-                            continue
-        except Exception as e:
-            logger.error(f"❌ DeepSeek stream 错误: {e}")
-            raise ValueError(f"DeepSeek 流式生成失败: {e}")
 
 
 class ClaudeModel(BaseAPIModel):
@@ -405,6 +268,7 @@ class ClaudeModel(BaseAPIModel):
         if not self.is_available():
             raise ValueError("Claude API 密钥未配置")
         
+        # 将上下文注入到消息中
         full_message = message
         if context:
             full_message = f"背景信息:\n{context}\n\n用户消息:\n{message}"
@@ -415,18 +279,13 @@ class ClaudeModel(BaseAPIModel):
             "content-type": "application/json"
         }
         
-        # 构建多轮消息（含历史）
-        history = _get_conversation_history(limit=5)
-        claude_msgs = []
-        for m in history:
-            claude_msgs.append({"role": m["role"], "content": m["content"]})
-        claude_msgs.append({"role": "user", "content": full_message})
-
         payload = {
             "model": self.model_name,
             "max_tokens": max_tokens,
             "system": get_dynamic_system_prompt() + "请用中文回复。",
-            "messages": claude_msgs
+            "messages": [
+                {"role": "user", "content": full_message}
+            ]
         }
         
         try:
@@ -616,19 +475,6 @@ class ModelManager:
         """使用指定模型生成回复"""
         model = self.get_model(model_name)
         return await model.generate(message, context, temperature, max_tokens)
-
-    async def generate_stream(
-        self,
-        message: str,
-        model_name: str = None,
-        context: str = "",
-        temperature: float = 0.7,
-        max_tokens: int = 512,
-    ) -> AsyncIterator[str]:
-        """使用指定模型流式生成回复"""
-        model = self.get_model(model_name)
-        async for chunk in model.generate_stream(message, context, temperature, max_tokens):
-            yield chunk
 
 
 # 创建全局模型管理器实例

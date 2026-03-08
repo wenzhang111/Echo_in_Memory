@@ -5,6 +5,7 @@
 在项目根目录运行此脚本
 """
 import sys
+import os
 from pathlib import Path
 
 # 添加项目根目录到Python路径
@@ -12,6 +13,8 @@ project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
 
 if __name__ == "__main__":
+    # Force-disable DeepSeek key in local startup to avoid unintended external API usage.
+    os.environ.pop("DEEPSEEK_API_KEY", None)
     # 导入FastAPI应用（从根目录）
     from main import app
     import uvicorn

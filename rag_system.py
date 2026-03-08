@@ -1,12 +1,13 @@
 """
 向量检索系统 (RAG) - 聊天记忆搜索和上下文检索
 """
+import os
+import time
 import numpy as np
 from typing import List, Dict, Tuple, Optional
 import logging
 import sys
 from pathlib import Path
-from sentence_transformers import SentenceTransformer
 
 # 添加父目录到路径以导入config
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -14,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from config import (
     EMBEDDING_MODEL, EMBEDDING_DIMENSION, 
     MAX_RETRIEVED_CONVERSATIONS, SIMILARITY_THRESHOLD,
-    EMBEDDINGS_DIR
+    EMBEDDINGS_DIR, HF_ENDPOINT, EMBEDDING_LOAD_RETRY_SECONDS
 )
 from database import db
 
@@ -29,21 +30,37 @@ class VectorStore:
         self.model = None
         self._loading = False
         self._loaded = False
+        self._last_load_failed_at = 0.0
         # 不在这里调用 _load_model，避免模块初始化时的网络请求
+
+        # 规范化并注入镜像端点，避免环境变量里包含空格/尾斜杠导致URL异常
+        if HF_ENDPOINT:
+            normalized = HF_ENDPOINT.strip().rstrip("/")
+            os.environ["HF_ENDPOINT"] = normalized
+
+    def _can_retry_load(self) -> bool:
+        if self._last_load_failed_at <= 0:
+            return True
+        return (time.time() - self._last_load_failed_at) >= max(0, EMBEDDING_LOAD_RETRY_SECONDS)
     
     def _load_model(self):
         """延迟加载模型"""
         if self._loading:
             return
+        if not self._can_retry_load():
+            return
+
         self._loading = True
         try:
             from sentence_transformers import SentenceTransformer
             self.model = SentenceTransformer(EMBEDDING_MODEL)
             self._loaded = True
+            self._last_load_failed_at = 0.0
             logger.info(f"✓ 嵌入模型加载完成: {EMBEDDING_MODEL}")
         except Exception as e:
             logger.warning(f"无法加载Sentence-Transformers模型，使用备用方案: {e}")
             self.model = None
+            self._last_load_failed_at = time.time()
         finally:
             self._loading = False
     

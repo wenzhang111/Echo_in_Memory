@@ -1,331 +1,193 @@
-# 言忆 (YanYi) — AI 记忆对话系统
+# 言忆
 
-<p align="center">
-  <strong>🧠 会记忆 · 懂情绪 · 多角色 · 可进化</strong>
-</p>
+言忆是一个多角色 AI 记忆对话系统，支持本地模型（Ollama）与外部 API 模型，具备长期记忆、风格提取、分角色数据管理和主动话题发起能力。
 
-<p align="center">
-  <img src="https://img.shields.io/badge/Python-3.10+-blue?logo=python" alt="Python">
-  <img src="https://img.shields.io/badge/FastAPI-0.104+-green?logo=fastapi" alt="FastAPI">
-  <img src="https://img.shields.io/badge/Ollama-本地推理-orange" alt="Ollama">
-  <img src="https://img.shields.io/badge/License-MIT-yellow" alt="License">
-</p>
+项目目标：把“聊天工具”升级成“可持续演化的人格工作台”。
 
----
+## 1. 核心能力
 
-言忆是一个多角色 AI 记忆对话系统，支持本地模型（Ollama）与外部 API（OpenAI / DeepSeek / Claude），具备：
+1. 多角色管理：每个角色独立人设、文风、聊天历史、统计。
+2. 长期记忆系统：自动提取并检索历史对话，支持语义召回。
+3. 风格提取学习：从聊天记录自动学习口头禅、语气词、表达节奏。
+4. 主动对话发起：结合时间/天气/近期话题，生成主动开场。
+5. 本地优先：支持纯本地 Ollama 运行，隐私可控。
+6. 一键启动：`RUN.bat` 支持从环境部署到运行的完整流程。
 
-- **长期记忆** — 自动提取、语义检索历史对话
-- **情绪追踪** — 实时分析用户情绪曲线，AI 自适应回复策略
-- **风格学习** — 从聊天记录自动学习表达习惯（口头禅、语气词、节奏）
-- **多角色管理** — 每个角色独立人设、文风、聊天历史
-- **意图感知** — 6 种意图分类 + 动态生成参数调优
-- **结构化上下文** — Token 预算管理，不再溢出上下文窗口
-- **回复增强** — 自动清理 thinking 标签、重复句、角色泄漏
-- **主动对话** — 结合时间/话题发起开场白
-- **一键启动** — `RUN.bat` 从环境部署到运行全自动
-
-> 项目定位：把"聊天工具"升级成"可持续演化的人格工作台"。
-
----
-
-## 📸 预览
-
-启动后访问 `http://localhost:8000` 打开 Web UI，包含对话、角色管理、数据统计等功能。
-
----
-
-## 🚀 快速开始
-
-### 前置条件
-
-- **Python 3.10+**
-- **Ollama**（[下载](https://ollama.com/)）
-- 一张 GPU（推荐 4GB+ 显存，CPU 也可运行但较慢）
-
-### 一键启动（Windows 推荐）
-
-```bat
-双击 RUN.bat
-```
-
-脚本会自动：创建 venv → 安装依赖 → 检查 Ollama → 选择模型 → 启动服务 → 打开浏览器
-
-停止服务：双击 `STOP.bat`
-
-### 手动启动
-
-```bash
-# 1. 创建虚拟环境
-python -m venv venv
-
-# 2. 激活（Windows）
-venv\Scripts\activate
-# 或 Linux/Mac:
-# source venv/bin/activate
-
-# 3. 安装依赖
-pip install -r requirements.txt
-
-# 4. 确保 Ollama 运行中
-ollama serve
-
-# 5. 拉取模型（首次）
-ollama pull qwen:4b
-
-# 6. 启动
-python run_server.py
-```
-
-启动后：
-- **Web UI**：http://localhost:8000
-- **API 文档**：http://localhost:8000/docs
-
-### 使用外部 API（可选）
-
-复制 `.env.example` 为 `.env`，填入你的密钥：
-
-```bash
-cp .env.example .env
-# 编辑 .env 填入 API Key
-```
-
-然后在 Web UI 的设置页切换到外部模型即可。
-
----
-
-## 📁 项目结构
+## 2. 项目结构
 
 ```text
 ai-girlfriend-memory/
-├─ main.py                 # FastAPI 主入口（REST API）
-├─ web_ui.html             # 前端页面（对话/角色/数据管理）
-├─ run_server.py           # 服务启动脚本
-├─ RUN.bat / start.sh      # 一键启动
-├─ STOP.bat                # 一键停止
-│
-├─ ollama_client.py        # Ollama 客户端 (/api/chat 结构化对话)
-├─ api_models.py           # 外部 API 模型 (OpenAI/DeepSeek/Claude)
-├─ config.py               # 全局配置
-│
-├─ context_engine.py       # Token 感知上下文构建器
-├─ emotion_tracker.py      # 情绪曲线追踪 (valence-arousal 模型)
-├─ response_enhancer.py    # 回复后处理 + 意图动态调参
-├─ intent_classifier.py    # 意图分类器
-│
-├─ memory_manager.py       # 记忆管理（提取/检索/注入）
-├─ rag_system.py           # 语义检索 (RAG)
-├─ database.py             # SQLite 数据层
-├─ character_manager.py    # 多角色管理
-│
-├─ style_learner.py        # 文风提取
-├─ llm_style_extractor.py  # LLM 风格分析
-├─ topic_initiator.py      # 主动话题发起
-├─ daily_briefing.py       # 每日简报
-├─ memory_compress.py      # 记忆压缩
-│
-├─ import_wechat_data.py   # 微信聊天记录导入工具
-├─ requirements.txt        # Python 依赖
-├─ .env.example            # 环境变量模板
-└─ data/                   # 运行时数据（自动生成）
+├─ main.py                # FastAPI 主入口
+├─ web_ui.html            # 前端页面（功能总览 + 对话 + 角色 + 数据管理）
+├─ run_server.py          # 服务启动脚本
+├─ RUN.bat                # 一键部署并启动
+├─ STOP.bat               # 一键停止
+├─ database.py            # 数据库层
+├─ memory_manager.py      # 记忆管理
+├─ rag_system.py          # 语义检索
+├─ optimized_rag.py       # 记忆检索优化
+├─ style_learner.py       # 风格提取
+├─ llm_style_extractor.py # LLM 风格分析
+├─ topic_initiator.py     # 主动话题
+├─ api_models.py          # 外部 API 模型
+├─ ollama_client.py       # Ollama 客户端
+├─ config.py              # 配置
+├─ requirements.txt       # 依赖
+└─ data/                  # 数据目录（含 data/girlfriend.db）
 ```
 
----
+## 3. 一键化部署与启动（推荐）
 
-## 🧩 核心架构
+直接双击 `RUN.bat`，脚本会自动执行以下步骤：
 
-```
-用户输入
-  │
-  ├─→ 意图分类 (intent_classifier)
-  │     └─→ 动态调参 (response_enhancer.get_dynamic_params)
-  │
-  ├─→ 情绪分析 (emotion_tracker)
-  │     └─→ 生成情绪策略提示
-  │
-  ├─→ 记忆检索 (memory_manager + rag_system)
-  │     └─→ 语义匹配相关历史
-  │
-  └─→ 上下文构建 (context_engine)
-        └─→ Token 预算分配 → 结构化 messages[]
-              │
-              ├─→ Ollama /api/chat (本地)
-              └─→ OpenAI/DeepSeek/Claude (外部 API)
-                    │
-                    └─→ 回复增强 (response_enhancer)
-                          └─→ 清理 + 质量评分 → 返回用户
-```
+1. 检查 Python。
+2. 自动创建 `venv`（若不存在）。
+3. 自动安装/校验依赖（`pip install -r requirements.txt`）。
+4. 检查并拉起 Ollama 服务。
+5. 自动列出你本机已有 Ollama 模型，并允许你选择。
+6. 以选定模型启动 FastAPI。
+7. 自动打开 Web UI。
 
----
+启动后访问：
 
-## 🎯 特性详解
+- Web UI：`http://localhost:8000`
+- API 文档：`http://localhost:8000/docs`
 
-### 意图动态调参
+停止服务：双击 `STOP.bat`。
 
-系统自动识别 6 种对话意图，并为每种意图配置最优生成参数：
+## 4. 模型选择说明
 
-| 意图 | 温度 | Max Tokens | 适用场景 |
-|------|------|------------|----------|
-| emotional_support | 0.85 | 600 | 情感倾诉、安慰 |
-| relationship | 0.80 | 500 | 日常关系互动 |
-| casual | 0.75 | 400 | 闲聊 |
-| advice | 0.50 | 800 | 求建议 |
-| planning | 0.40 | 600 | 规划、决策 |
-| knowledge | 0.30 | 1000 | 知识问答 |
+### 4.1 在 RUN.bat 中选择现有模型
 
-### 情绪追踪
+`RUN.bat` 会读取 `ollama list` 并展示本机模型列表，你可输入模型名切换。
 
-- 60+ 中文情绪词库，基于 valence-arousal 模型
-- 实时分析每轮用户情绪
-- AI 回复前自动注入策略（低落→共情安慰，焦虑→引导放松）
-- 提供情绪曲线 API 供前端可视化
+输入后脚本会先校验模型是否存在；若不存在，会询问是否自动 `ollama pull`。
 
-### 回复增强流水线
+示例：
 
-```
-原始输出 → 清除<think>标签 → 移除角色泄漏 → 去重复句 → 修剪截断 → 质量评分
+- `qwen:4b`
+- `qwen2.5:7b`
+- `llama3:8b`
+
+如果本机没有模型，脚本会提示自动拉取默认模型 `qwen:4b`。
+
+### 4.2 固定默认模型（可选）
+
+在 `config.py` 中：
+
+```python
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen:4b")
 ```
 
-### Token 预算管理
+或手动设置环境变量后启动：
 
-- system prompt ≤ 50% 预算
-- 剩余空间动态分配给对话历史 + 当前输入
-- 自动截断最老的历史轮次
-
----
-
-## 📡 API 接口
-
-### 对话
-
-| 端点 | 方法 | 说明 |
-|------|------|------|
-| `/chat` | POST | 本地模型对话 |
-| `/chat/stream` | GET | 本地模型流式 |
-| `/chat-api` | POST | 外部模型对话 |
-| `/chat-api/stream` | POST | 外部模型流式 (SSE) |
-
-### 情绪
-
-| 端点 | 方法 | 说明 |
-|------|------|------|
-| `/emotion/current` | GET | 实时分析文本情绪 |
-| `/emotion/trend` | GET | 近期情绪走势 |
-| `/emotion/curve` | GET | 情绪曲线数据 |
-
-### 角色
-
-| 端点 | 方法 | 说明 |
-|------|------|------|
-| `/characters` | GET/POST | 列出/创建角色 |
-| `/characters/{id}` | PUT/DELETE | 更新/删除角色 |
-| `/characters/{id}/activate` | POST | 切换活动角色 |
-
-### 记忆与统计
-
-| 端点 | 方法 | 说明 |
-|------|------|------|
-| `/memory/context` | GET | 当前记忆上下文 |
-| `/memory/search` | GET | 语义搜索记忆 |
-| `/history` | GET | 对话历史 |
-| `/stats` | GET | 统计数据 |
-
-### 风格与主动对话
-
-| 端点 | 方法 | 说明 |
-|------|------|------|
-| `/style/learn` | POST | 从记录学习文风 |
-| `/style/profile` | GET | 当前风格画像 |
-| `/topic/suggest` | GET | 话题建议 |
-| `/topic/proactive/trigger` | POST | 触发主动对话 |
-
-完整 API 文档启动后访问：http://localhost:8000/docs
-
----
-
-## ⚙️ 配置说明
-
-### 模型选择
-
-在 `RUN.bat` 启动时会自动列出本机 Ollama 模型，也可在 `config.py` 或环境变量中指定：
-
-```bash
-# 环境变量方式
+```bat
 set OLLAMA_MODEL=qwen2.5:7b
 python run_server.py
 ```
 
-推荐模型：
-- **qwen:4b** — 4GB 显存，速度快（入门）
-- **qwen3:8b** — 8GB 显存，效果好（推荐）
-- **qwen2.5:14b** — 16GB 显存，高质量
+## 5. WebUI 操作指南
 
-### 上下文窗口
+### 5.1 功能总览
 
-```bash
-# 小模型建议 4000~6000，大模型可提高到 8000~12000
-set MODEL_CONTEXT_WINDOW=6000
+首页“功能总览”会集中展示所有能力，并提供快捷按钮。
+
+### 5.2 推荐流程
+
+1. 导入聊天记录（导入页）。
+2. 在角色页点击“**一键提取当前角色风格**”。
+3. 回到对话页开始聊天。
+4. 在设置页使用“分角色数据管理”导出/清理。
+
+### 5.3 分角色数据管理
+
+设置页支持数据范围切换：
+
+- 当前角色
+- 全部角色
+
+并提供：
+
+- 刷新统计
+- 导出历史
+- 导出记忆
+- 按范围清理会话
+- 全库清空
+
+## 6. API 关键接口
+
+### 对话
+
+- `POST /chat`（本地模型）
+- `GET /chat/stream`（本地流式）
+- `POST /chat-api`（外部模型）
+- `POST /chat-api/stream`（外部流式）
+
+### 角色
+
+- `GET /characters`
+- `POST /characters`
+- `PUT /characters/{char_id}`
+- `DELETE /characters/{char_id}`
+- `POST /characters/{char_id}/activate`
+
+### 记忆与统计
+
+- `GET /memory/context`
+- `GET /memory/search`
+- `GET /history`
+- `GET /history/related`
+- `GET /stats`
+- `GET /stats/optimized`
+
+### 风格与主动对话
+
+- `POST /style/learn`
+- `GET /style/profile`
+- `GET /topic/suggest`
+- `POST /topic/proactive/trigger`
+
+### 管理
+
+- `GET /admin/conversation-summary`
+- `DELETE /admin/clear-conversations`
+- `POST /admin/clear`
+
+## 7. 手动启动（非一键）
+
+```bat
+cd c:\Users\HP\Desktop\ai-girlfriend-memory
+python -m venv venv
+venv\Scripts\activate
+pip install -r requirements.txt
+ollama serve
+python run_server.py
 ```
 
-### GPU 配置
+## 8. 常见问题
 
-```bash
-# 强制 GPU 推理
-set OLLAMA_FORCE_GPU=1
-set OLLAMA_NUM_GPU=999
+### Q1: 页面显示 Ollama 未连接
+
+先执行：
+
+```bat
+ollama serve
 ```
 
----
+然后重新运行 `RUN.bat`。
 
-## 📥 导入聊天记录
+### Q2: 端口冲突（8000/11434）
 
-支持导入微信聊天记录以训练文风：
+双击 `STOP.bat` 清理，再重新启动。
 
-```bash
-python import_wechat_data.py your_messages.json
-```
+### Q3: 导入后风格没变化
 
-导入后到 Web UI 角色页点击"**一键提取当前角色风格**"。
+导入完成后到角色页手动点“**一键提取当前角色风格**”。
 
----
+### Q4: 新电脑迁移
 
-## ❓ 常见问题
+把整个项目文件夹拷贝过去，直接双击 `RUN.bat` 即可自动部署和启动。
 
-**Q: Ollama 未连接？**
-→ 先运行 `ollama serve`，再启动项目
+## 9. 版本说明
 
-**Q: 端口冲突（8000/11434）？**
-→ 双击 `STOP.bat` 清理旧进程
-
-**Q: 显存不足？**
-→ 换小模型 `qwen:4b`，或设置 `OLLAMA_FORCE_GPU=0` 允许 CPU 回退
-
-**Q: 新电脑迁移？**
-→ 复制整个项目文件夹，双击 `RUN.bat` 自动部署
-
----
-
-## 🤝 贡献
-
-欢迎提交 Issue 和 Pull Request！
-
-1. Fork 本仓库
-2. 创建分支：`git checkout -b feature/your-feature`
-3. 提交：`git commit -m 'feat: add your feature'`
-4. 推送：`git push origin feature/your-feature`
-5. 提交 PR
-
----
-
-## 📄 License
-
-[MIT License](LICENSE) — 自由使用，保留署名即可。
-
----
-
-## 🙏 致谢
-
-- [Ollama](https://ollama.com/) — 本地大模型推理
-- [FastAPI](https://fastapi.tiangolo.com/) — Web 框架
-- [sentence-transformers](https://www.sbert.net/) — 语义向量
-- [Qwen](https://github.com/QwenLM/Qwen) — 推荐基座模型
+当前项目名已统一为：**言忆**。

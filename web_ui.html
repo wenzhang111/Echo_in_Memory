@@ -1118,9 +1118,6 @@
             refreshDataScopeSummary();
             // 检查服务状态
             checkServiceStatus();
-            // 加载风格档案 & 主动话题建议
-            loadStyleProfile();
-            loadTopicSuggestion();
             // 每10秒检查一次服务状态
             setInterval(checkServiceStatus, 10000);
         });
@@ -1184,7 +1181,12 @@
             const temperature = localStorage.getItem('temperature') || '0.7';
             const maxTokens = localStorage.getItem('maxTokens') || '512';
             const useMemory = localStorage.getItem('useMemory') !== 'false';
-            const model = localStorage.getItem('currentModel') || 'ollama';
+            let model = localStorage.getItem('currentModel') || 'ollama';
+            // DeepSeek API has been disabled locally; prevent stale localStorage from re-selecting it.
+            if (model === 'deepseek-chat') {
+                model = 'ollama';
+                localStorage.setItem('currentModel', 'ollama');
+            }
             
             document.getElementById('temperature').value = temperature;
             document.getElementById('maxTokens').value = maxTokens;
@@ -1212,16 +1214,22 @@
             try {
                 const response = await fetch(`${API_BASE}/list-models`);
                 const data = await response.json();
-                
-                if (data.available_models && data.available_models.length > 0) {
-                    const availableNames = data.available_models.map(m => m.id).join(', ');
-                    document.getElementById('modelStatus').textContent = `${availableNames} (点击下拉选择)`;
+
+                const list = Array.isArray(data.available_models) ? data.available_models : [];
+                const names = list
+                    .map(m => m?.id || m?.model || m?.name || m?.info?.name)
+                    .filter(Boolean);
+
+                if (names.length > 0) {
+                    const preview = names.slice(0, 3).join(', ');
+                    document.getElementById('modelStatus').textContent = `✓ ${names.length} 个模型可用: ${preview}${names.length > 3 ? ' ...' : ''}`;
                 } else {
-                    document.getElementById('modelStatus').textContent = 'Ollama';
+                    document.getElementById('modelStatus').textContent = '⚠️ 暂未发现可用模型';
                 }
+                updateCurrentModelDisplay();
             } catch (error) {
                 console.error('加载模型列表失败:', error);
-                document.getElementById('modelStatus').textContent = 'Ollama';
+                document.getElementById('modelStatus').textContent = '⚠️ 无法连接到服务器';
             }
         }
         
@@ -1244,14 +1252,19 @@
         }
         
         function updateCurrentModelDisplay() {
-            const modelMap = {
-                'ollama': '🏠 本地(Ollama)',
-                'deepseek-chat': '🚀 DeepSeek',
-                'gpt-3.5-turbo': '⚡ GPT-3.5-turbo',
-                'gpt-4-turbo': '⚡ GPT-4-turbo',
-                'claude-3-sonnet': '✨ Claude'
-            };
-            document.getElementById('modelStatus').textContent = modelMap[currentModel] || currentModel;
+            const modelSelect = document.getElementById('modelSelect');
+            if (!modelSelect) return;
+
+            currentModel = modelSelect.value;
+            const headerSelect = document.getElementById('modelSelectHeader');
+            if (headerSelect) headerSelect.value = currentModel;
+
+            const selectedOption = modelSelect.options[modelSelect.selectedIndex];
+            const currentModelEl = document.getElementById('currentModel');
+            if (currentModelEl && selectedOption) {
+                currentModelEl.textContent = selectedOption.text;
+            }
+            localStorage.setItem('currentModel', currentModel);
         }
         
         // ==================== 标签页切换 ====================
@@ -1286,29 +1299,6 @@
         }
         
         // ==================== 模型管理 ====================
-        async function loadAvailableModels() {
-            try {
-                const response = await fetch(`${API_BASE}/list-models`);
-                if (!response.ok) throw new Error('无法加载模型列表');
-                
-                const data = await response.json();
-                document.getElementById('modelStatus').textContent = `✓ ${data.count} 个模型可用`;
-                updateCurrentModelDisplay();
-            } catch (error) {
-                document.getElementById('modelStatus').textContent = '⚠️ 无法连接到服务器';
-                console.error('加载模型列表失败:', error);
-            }
-        }
-        
-        function updateCurrentModelDisplay() {
-            const modelSelect = document.getElementById('modelSelect');
-            currentModel = modelSelect.value;
-            const headerSelect = document.getElementById('modelSelectHeader');
-            if (headerSelect) headerSelect.value = currentModel;
-            const selectedOption = modelSelect.options[modelSelect.selectedIndex];
-            document.getElementById('currentModel').textContent = selectedOption.text;
-            localStorage.setItem('currentModel', currentModel);
-        }
         
         async function testAvailableModels() {
             try {
@@ -1575,69 +1565,200 @@
         }
         
         // ==================== 记忆库功能 ====================
-        async function loadMemories() {
-            try {
-                // 使用优化的推荐端点获取高质量记忆
-                const response = await fetch(`${API_BASE}/memories/quality?limit=50&threshold=0.7`);
-                const data = await response.json();
-                
-                if (data.status === 'success') {
-                    const context = data.context;
-                    
-                    // 显示统计信息
-                    document.getElementById('personalityCount').textContent = '加载中...';
-                    document.getElementById('relationshipCount').textContent = '加载中...';
-                    document.getElementById('experienceCount').textContent = '加载中...';
-                    document.getElementById('preferenceCount').textContent = '加载中...';
-                    
-                    // 解析上下文并显示
-                    const memoryList = document.getElementById('memoryList');
-                    if (memoryList) {
-                        memoryList.innerHTML = '';
-                        
-                        const memories = context.split('---').filter(m => m.trim());
-                        memories.slice(0, 10).forEach((memory) => {
-                            const item = document.createElement('div');
-                            item.className = 'memory-item';
-                            const preview = memory.substring(0, 100).trim();
-                            item.innerHTML = `
-                                <p>${preview}${preview.length > 100 ? '...' : ''}</p>
-                                <span class="memory-category">⭐ 高质量记忆</span>
-                            `;
-                            memoryList.appendChild(item);
-                        });
-                        
-                        if (memories.length === 0) {
-                            memoryList.innerHTML = '<p class="text-gray-500">暂无高质量记忆，继续聊天来积累~</p>';
-                        }
-                    }
-                }
-            } catch (error) {
-                console.error('加载记忆失败:', error);
-                document.getElementById('personalityCount').textContent = '0';
-                document.getElementById('relationshipCount').textContent = '0';
-                document.getElementById('experienceCount').textContent = '0';
-                document.getElementById('preferenceCount').textContent = '0';
-            }
-        }
-        
+        let memoryMap = {};
+
         function getCategoryLabel(category) {
             const labels = {
                 personality: '个性',
                 relationship: '关系',
                 experience: '经历',
-                preference: '偏好'
+                preference: '偏好',
+                important_info: '重要信息'
             };
-            return labels[category] || category;
+            return labels[category] || category || '未分类';
         }
-        
-        function searchMemories() {
-            const keyword = document.getElementById('memorySearch').value;
-            if (!keyword) {
-                loadMemories();
+
+        function updateMemoryStats(memories) {
+            const byCat = {
+                personality: 0,
+                relationship: 0,
+                experience: 0,
+                preference: 0
+            };
+
+            (memories || []).forEach(m => {
+                const c = m.category;
+                if (Object.prototype.hasOwnProperty.call(byCat, c)) {
+                    byCat[c] += 1;
+                }
+            });
+
+            document.getElementById('personalityCount').textContent = byCat.personality;
+            document.getElementById('relationshipCount').textContent = byCat.relationship;
+            document.getElementById('experienceCount').textContent = byCat.experience;
+            document.getElementById('preferenceCount').textContent = byCat.preference;
+        }
+
+        function renderMemoryList(memories) {
+            const list = document.getElementById('memoryList');
+            if (!list) return;
+
+            list.innerHTML = '';
+            memoryMap = {};
+
+            if (!memories || memories.length === 0) {
+                list.innerHTML = '<p class="text-gray-500">暂无记忆，可先导入聊天记录并触发记忆提取。</p>';
                 return;
             }
-            // 实现搜索逻辑
+
+            memories.forEach(m => {
+                memoryMap[m.id] = m;
+
+                const item = document.createElement('div');
+                item.className = 'memory-item';
+
+                const score = Number(m.importance_score || 0).toFixed(2);
+                const updated = (m.last_updated || '').replace('T', ' ').slice(0, 19);
+
+                item.innerHTML = `
+                    <div class="flex justify-between gap-3 items-start">
+                        <div class="flex-1 min-w-0">
+                            <div class="text-sm mb-1"><span class="memory-category">${getCategoryLabel(m.category)}</span> <span class="text-gray-400 ml-2">#${m.id}</span></div>
+                            <p class="text-sm text-gray-800 break-words">${m.content || ''}</p>
+                            <div class="text-xs text-gray-500 mt-1">key: ${m.key || '-'} | 重要性: ${score}${updated ? ` | 更新: ${updated}` : ''}</div>
+                        </div>
+                        <div class="flex flex-col gap-1 shrink-0">
+                            <button class="text-xs py-1 px-2 bg-blue-50 text-blue-700 border border-blue-200 rounded" onclick="editMemoryItem(${m.id})">编辑</button>
+                            <button class="text-xs py-1 px-2 bg-amber-50 text-amber-700 border border-amber-200 rounded" onclick="correctMemoryItem(${m.id})">纠错</button>
+                            <button class="text-xs py-1 px-2 bg-red-50 text-red-700 border border-red-200 rounded" onclick="deleteMemoryItem(${m.id})">删除</button>
+                        </div>
+                    </div>
+                `;
+                list.appendChild(item);
+            });
+        }
+
+        async function loadMemories() {
+            try {
+                const response = await fetch(`${API_BASE}/memory/all?limit=120`);
+                const data = await response.json();
+                const memories = data.memories || [];
+
+                updateMemoryStats(memories);
+                renderMemoryList(memories);
+            } catch (error) {
+                console.error('加载记忆失败:', error);
+                updateMemoryStats([]);
+                const list = document.getElementById('memoryList');
+                if (list) list.innerHTML = '<p class="text-red-500">加载记忆失败，请稍后重试。</p>';
+            }
+        }
+
+        async function searchMemories() {
+            const keyword = document.getElementById('memorySearch').value.trim();
+            if (!keyword) {
+                await loadMemories();
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/memory/search?keyword=${encodeURIComponent(keyword)}`);
+                const data = await response.json();
+                const results = (data.results || []).map(item => ({
+                    ...item,
+                    last_updated: item.last_updated || ''
+                }));
+                updateMemoryStats(results);
+                renderMemoryList(results);
+            } catch (error) {
+                console.error('搜索记忆失败:', error);
+                showToast('❌ 搜索记忆失败', 'error');
+            }
+        }
+
+        async function editMemoryItem(memoryId) {
+            const memory = memoryMap[memoryId];
+            if (!memory) return;
+
+            const next = prompt('编辑记忆内容：', memory.content || '');
+            if (next === null) return;
+
+            const content = next.trim();
+            if (!content) {
+                showToast('❌ 内容不能为空', 'error');
+                return;
+            }
+
+            try {
+                const resp = await fetch(`${API_BASE}/memory/${memoryId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ content })
+                });
+                const data = await resp.json();
+                if (resp.ok && data.status === 'success') {
+                    showToast('✓ 记忆已更新', 'success');
+                    loadMemories();
+                } else {
+                    showToast(`❌ 更新失败: ${data.detail || '未知错误'}`, 'error');
+                }
+            } catch (e) {
+                showToast('❌ 更新异常: ' + e.message, 'error');
+            }
+        }
+
+        async function correctMemoryItem(memoryId) {
+            const memory = memoryMap[memoryId];
+            if (!memory) return;
+
+            const corrected = prompt('请输入纠正后的记忆内容：', memory.content || '');
+            if (corrected === null) return;
+
+            const correctedContent = corrected.trim();
+            if (!correctedContent) {
+                showToast('❌ 纠错内容不能为空', 'error');
+                return;
+            }
+
+            const reason = prompt('可选：纠错原因（便于系统学习）', '') || '';
+
+            try {
+                const resp = await fetch(`${API_BASE}/memory/correct`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        memory_id: memoryId,
+                        corrected_content: correctedContent,
+                        correction_reason: reason
+                    })
+                });
+                const data = await resp.json();
+                if (resp.ok && data.status === 'success') {
+                    showToast('✓ 记忆纠错完成', 'success');
+                    loadMemories();
+                } else {
+                    showToast(`❌ 纠错失败: ${data.detail || '未知错误'}`, 'error');
+                }
+            } catch (e) {
+                showToast('❌ 纠错异常: ' + e.message, 'error');
+            }
+        }
+
+        async function deleteMemoryItem(memoryId) {
+            if (!confirm(`确定删除记忆 #${memoryId} 吗？`)) return;
+
+            try {
+                const resp = await fetch(`${API_BASE}/memory/${memoryId}`, { method: 'DELETE' });
+                const data = await resp.json();
+                if (resp.ok && data.status === 'success') {
+                    showToast('✓ 记忆已删除', 'success');
+                    loadMemories();
+                } else {
+                    showToast(`❌ 删除失败: ${data.detail || '未知错误'}`, 'error');
+                }
+            } catch (e) {
+                showToast('❌ 删除异常: ' + e.message, 'error');
+            }
         }
         
         // ==================== 文件导入功能 ====================
@@ -1753,50 +1874,38 @@
         // ==================== 聊天历史功能 ====================
         async function loadChatHistory() {
             try {
-                const response = await fetch(`${API_BASE}/history?limit=50`);
+                const cid = activeCharacterId || 'default';
+                const response = await fetch(`${API_BASE}/history?limit=80&character_id=${encodeURIComponent(cid)}`);
                 const data = await response.json();
                 
                 const list = document.getElementById('chatHistoryList');
                 list.innerHTML = '';
                 
-                if (data.conversations && data.conversations.length === 0) {
-                    list.innerHTML = '<p class="text-gray-500">暂无聊天记录</p>';
+                const conversations = data.conversations || [];
+                if (conversations.length === 0) {
+                    list.innerHTML = '<p class="text-gray-500">当前角色暂无服务端聊天记录</p>';
                     return;
                 }
-                
-                // 显示本地消息历史
-                if (messageHistory.length === 0) {
-                    list.innerHTML = '<p class="text-gray-500">本轮对话暂无记录</p>';
-                    return;
-                }
-                
-                messageHistory.forEach((msg, idx) => {
+
+                conversations.forEach((pair) => {
                     const item = document.createElement('div');
                     item.className = 'memory-item';
-                    const time = new Date(msg.time).toLocaleString('zh-CN');
-                    const modelInfo = msg.model ? ` [${msg.model}]` : '';
+                    const time = pair.timestamp ? new Date(pair.timestamp).toLocaleString('zh-CN') : '-';
+                    const userText = (pair.user_message || '').trim() || '（系统消息）';
+                    const aiText = (pair.ai_response || '').trim() || '（空）';
                     item.innerHTML = `
-                        <div class="flex justify-between items-start">
-                            <div class="flex-1">
-                                <p><strong>${msg.role === 'user' ? '👤 你' : '💝 AI'}:</strong> ${msg.content.substring(0, 100)}...</p>
-                                <span class="memory-category">${time}${modelInfo}</span>
-                            </div>
-                            <button class="memory-delete-btn" onclick="deleteLocalMessage(${idx})">删除</button>
+                        <div class="space-y-1">
+                            <p><strong>👤 你:</strong> ${userText.substring(0, 160)}${userText.length > 160 ? '...' : ''}</p>
+                            <p><strong>💝 AI:</strong> ${aiText.substring(0, 200)}${aiText.length > 200 ? '...' : ''}</p>
+                            <span class="memory-category">${time}</span>
                         </div>
                     `;
                     list.appendChild(item);
                 });
             } catch (error) {
                 console.error('加载聊天历史失败:', error);
-            }
-        }
-        
-        function deleteLocalMessage(index) {
-            if (confirm('确定删除这条记录吗？')) {
-                messageHistory.splice(index, 1);
-                saveChatHistory();
-                loadChatHistory();
-                showToast('✓ 已删除', 'success');
+                const list = document.getElementById('chatHistoryList');
+                if (list) list.innerHTML = '<p class="text-red-500">加载历史失败，请稍后重试</p>';
             }
         }
         
@@ -2100,22 +2209,6 @@
             document.getElementById('avgLength').textContent = (data.avg_response_length || data.average_quality * 100 || 0).toFixed(0);
         }
         
-        // 旧版本 (已废弃)
-        // async function loadStats() {
-        //     try {
-        //         const response = await fetch(`${API_BASE}/stats`);
-        //         if (!response.ok) return;
-        //         
-        //         const data = await response.json();
-        //         document.getElementById('totalChats').textContent = data.total_conversations || 0;
-        //         document.getElementById('userMessages').textContent = data.user_messages || 0;
-        //         document.getElementById('aiMessages').textContent = data.ai_messages || 0;
-        //         document.getElementById('avgLength').textContent = (data.avg_response_length || 0).toFixed(0);
-        //     } catch (error) {
-        //         console.error('加载统计信息失败:', error);
-        //     }
-        // }
-        
         // ==================== API密钥管理 ====================
         function saveApiKeys() {
             localStorage.setItem('deepseekApiKey', document.getElementById('deepseekApiKey').value);
@@ -2125,7 +2218,9 @@
         }
         
         function loadApiKeys() {
-            document.getElementById('deepseekApiKey').value = localStorage.getItem('deepseekApiKey') || '';
+            // Force-clear stale DeepSeek key from browser local storage.
+            localStorage.removeItem('deepseekApiKey');
+            document.getElementById('deepseekApiKey').value = '';
             document.getElementById('openaiApiKey').value = localStorage.getItem('openaiApiKey') || '';
             document.getElementById('claudeApiKey').value = localStorage.getItem('claudeApiKey') || '';
         }
@@ -2152,31 +2247,6 @@
             showToast('✓ 所有设置已保存！', 'success');
         }
         
-        function exportDb() {
-            const data = {
-                messageHistory: messageHistory,
-                exportTime: new Date().toISOString()
-            };
-            const jsonStr = JSON.stringify(data, null, 2);
-            const blob = new Blob([jsonStr], { type: 'application/json' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `backup-${new Date().getTime()}.json`;
-            a.click();
-            URL.revokeObjectURL(url);
-            showToast('✓ 数据已导出', 'success');
-        }
-        
-        function clearAllData() {
-            if (confirm('确定要清空所有数据吗？此操作不可撤销！')) {
-                messageHistory = [];
-                document.getElementById('chatBox').innerHTML = '';
-                localStorage.clear();
-                showToast('✓ 所有数据已清空', 'success');
-            }
-        }
-
         function getDataScopeParams() {
             const scope = document.getElementById('dataScopeSelect')?.value || 'current';
             if (scope === 'all') {
