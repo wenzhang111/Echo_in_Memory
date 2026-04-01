@@ -192,25 +192,27 @@ class EmotionEngine:
 
     @staticmethod
     def _path(char_id: str) -> Path:
-        safe_id = _sanitize_char_id(char_id)
-        return DATA_DIR / f"{safe_id}.json"
+        # char_id must already be sanitized before calling _path
+        return DATA_DIR / f"{char_id}.json"
 
     def load(self, char_id: str) -> EmotionState:
-        path = self._path(char_id)
+        safe_id = _sanitize_char_id(char_id)
+        path = self._path(safe_id)
         if path.exists():
             try:
                 data = json.loads(path.read_text(encoding="utf-8"))
                 return EmotionState.from_dict(data)
             except Exception as exc:
-                logger.warning(f"加载情绪状态失败 {char_id}: {exc}")
-        return EmotionState(char_id=char_id)
+                logger.warning(f"加载情绪状态失败 {safe_id}: {exc}")
+        return EmotionState(char_id=safe_id)
 
     def save(self, state: EmotionState) -> None:
-        path = self._path(state.char_id)
+        safe_id = _sanitize_char_id(state.char_id)
+        path = self._path(safe_id)
         try:
             path.write_text(json.dumps(state.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
         except Exception as exc:
-            logger.warning(f"保存情绪状态失败 {state.char_id}: {exc}")
+            logger.warning(f"保存情绪状态失败 {safe_id}: {exc}")
 
     def update_from_text(self, char_id: str, user_text: str, ai_text: str = "") -> EmotionState:
         """根据用户消息和 AI 回复更新情绪状态，返回更新后的状态"""
