@@ -9,15 +9,15 @@ from __future__ import annotations
 import json
 import logging
 import math
-import os
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 logger = logging.getLogger(__name__)
 
 DATA_DIR = Path(__file__).parent / "data" / "emotions"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
+EMOTION_STATE_FILE = DATA_DIR / "states.json"
 
 # ──────────────────────────────────────────────
 # 情绪维度定义
@@ -192,41 +192,40 @@ class EmotionEngine:
     """情感引擎 - 加载/保存/更新每个角色的情绪状态"""
 
     @staticmethod
-    def _path(char_id: str) -> Path:
-        # char_id must already be sanitized before calling _path
-        return DATA_DIR / f"{char_id}.json"
-
-    def _safe_path(self, char_id: str) -> Optional[Path]:
-        """Return a path confined to DATA_DIR, or None if confinement fails."""
-        # Double-sanitize: regex strip + basename to eliminate any path separators
-        safe_id = os.path.basename(_sanitize_char_id(char_id))
-        path = DATA_DIR / f"{safe_id}.json"
-        # Runtime confinement guard: raises ValueError if path escapes DATA_DIR
+    def _load_index() -> Dict[str, dict]:
+        if not EMOTION_STATE_FILE.exists():
+            return {}
         try:
-            path.resolve().relative_to(DATA_DIR.resolve())
-        except ValueError:
-            logger.warning(f"路径越界检测：{char_id!r} 被拒绝")
-            return None
-        return path
+            return json.loads(EMOTION_STATE_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+
+    @staticmethod
+    def _save_index(index_data: Dict[str, dict]) -> None:
+        EMOTION_STATE_FILE.write_text(
+            json.dumps(index_data, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
 
     def load(self, char_id: str) -> EmotionState:
-        safe_id = os.path.basename(_sanitize_char_id(char_id))
-        path = self._safe_path(safe_id)
-        if path is not None and path.exists():
+        safe_id = _sanitize_char_id(char_id)
+        index_data = self._load_index()
+        data = index_data.get(safe_id)
+        if isinstance(data, dict):
             try:
-                data = json.loads(path.read_text(encoding="utf-8"))
                 return EmotionState.from_dict(data)
             except Exception as exc:
                 logger.warning(f"加载情绪状态失败 {safe_id}: {exc}")
         return EmotionState(char_id=safe_id)
 
     def save(self, state: EmotionState) -> None:
-        safe_id = os.path.basename(_sanitize_char_id(state.char_id))
-        path = self._safe_path(safe_id)
-        if path is None:
-            return
+        safe_id = _sanitize_char_id(state.char_id)
         try:
-            path.write_text(json.dumps(state.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
+            index_data = self._load_index()
+            payload = state.to_dict()
+            payload["char_id"] = safe_id
+            index_data[safe_id] = payload
+            self._save_index(index_data)
         except Exception as exc:
             logger.warning(f"保存情绪状态失败 {safe_id}: {exc}")
 

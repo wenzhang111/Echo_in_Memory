@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 
 STYLE_DIR = Path(__file__).parent / "data" / "styles"
 STYLE_DIR.mkdir(parents=True, exist_ok=True)
+STYLE_INDEX_FILE = STYLE_DIR / "_profiles.json"
 
 
 class StyleProfile:
@@ -341,20 +342,19 @@ class StyleLearner:
         profile = self.analyze(ai_responses)
         profile.style_strength = self._infer_style_strength(profile)
         profile.negative_constraints = self._build_negative_constraints(profile)
-        path = STYLE_DIR / f"{character_id}.json"
-        with open(path, 'w', encoding='utf-8') as f:
-            json.dump(profile.to_dict(), f, ensure_ascii=False, indent=2)
+        path = self.save_profile(profile, character_id)
         logger.info(f"语言风格档案已保存: {path}  (样本数 {profile.sample_count})")
         return profile
 
     @staticmethod
     def load_profile(character_id: str = "default") -> Optional[StyleProfile]:
-        path = STYLE_DIR / f"{character_id}.json"
-        if not path.exists():
+        safe_id = StyleLearner._sanitize_character_id(character_id)
+        index_data = StyleLearner._load_index()
+        raw = index_data.get(safe_id)
+        if not isinstance(raw, dict):
             return None
         try:
-            with open(path, 'r', encoding='utf-8') as f:
-                return StyleProfile.from_dict(json.load(f))
+            return StyleProfile.from_dict(raw)
         except Exception:
             return None
 
@@ -371,10 +371,37 @@ class StyleLearner:
         profile = self.analyze_and_save(ai_responses, character_id)
         profile.scene_profiles = self.analyze_by_scene(pairs)
         profile.drift_score = self.detect_style_drift(profile, ai_responses[-30:])
-        path = STYLE_DIR / f"{character_id}.json"
-        with open(path, 'w', encoding='utf-8') as f:
-            json.dump(profile.to_dict(), f, ensure_ascii=False, indent=2)
+        self.save_profile(profile, character_id)
         return profile
+
+    @staticmethod
+    def _sanitize_character_id(character_id: str) -> str:
+        safe = re.sub(r"[^a-zA-Z0-9_\-]", "_", str(character_id or "default"))
+        return safe[:64] if safe else "default"
+
+    @staticmethod
+    def _load_index() -> Dict[str, dict]:
+        if not STYLE_INDEX_FILE.exists():
+            return {}
+        try:
+            return json.loads(STYLE_INDEX_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+
+    @staticmethod
+    def _save_index(index_data: Dict[str, dict]) -> None:
+        STYLE_INDEX_FILE.write_text(
+            json.dumps(index_data, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+    @classmethod
+    def save_profile(cls, profile: StyleProfile, character_id: str = "default") -> Optional[Path]:
+        safe_id = cls._sanitize_character_id(character_id)
+        index_data = cls._load_index()
+        index_data[safe_id] = profile.to_dict()
+        cls._save_index(index_data)
+        return STYLE_INDEX_FILE
 
     def analyze_by_scene(self, pairs: List[Dict]) -> Dict[str, Dict]:
         buckets: Dict[str, List[str]] = {k: [] for k in self.SCENE_MARKERS.keys()}

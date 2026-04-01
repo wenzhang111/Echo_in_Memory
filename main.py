@@ -98,6 +98,12 @@ class StyleControlRequest(BaseModel):
     negative_constraints: Optional[List[str]] = None
 
 
+def _safe_character_id(raw_id: str) -> str:
+    import re
+    safe = re.sub(r"[^a-zA-Z0-9_\-]", "_", str(raw_id or "default"))
+    return safe[:64] if safe else "default"
+
+
 class DailyTodoItem(BaseModel):
     title: str
     time_hint: str = ""
@@ -920,7 +926,7 @@ async def get_style_profile(character_id: str = None):
 
 @app.put("/style/control")
 async def update_style_control(data: StyleControlRequest, character_id: str = None):
-    cid = character_id or character_manager.get_active_id()
+    cid = _safe_character_id(character_id or character_manager.get_active_id())
     profile = StyleLearner.load_profile(cid)
     if not profile:
         raise HTTPException(status_code=404, detail="风格档案不存在，请先学习风格")
@@ -933,10 +939,9 @@ async def update_style_control(data: StyleControlRequest, character_id: str = No
     if data.negative_constraints is not None:
         profile.negative_constraints = [x.strip() for x in data.negative_constraints if str(x).strip()][:12]
 
-    from style_learner import STYLE_DIR
-    style_path = STYLE_DIR / f"{cid}.json"
-    with open(style_path, "w", encoding="utf-8") as f:
-        json.dump(profile.to_dict(), f, ensure_ascii=False, indent=2)
+    saved = StyleLearner.save_profile(profile, cid)
+    if saved is None:
+        raise HTTPException(status_code=400, detail="非法角色ID")
 
     return {"status": "success", "character_id": cid, "profile": profile.to_dict()}
 

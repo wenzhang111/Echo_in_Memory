@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from database import db
 from api_models import model_manager
-from style_learner import StyleProfile, STYLE_DIR, style_learner
+from style_learner import StyleProfile, style_learner, StyleLearner
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -171,10 +171,8 @@ class LLMStyleExtractor:
         except Exception as e:
             logger.error(f"生成最终总结出错: {e}")
             
-        # Save to disk
-        path = STYLE_DIR / f"{character_id}.json"
-        with open(path, 'w', encoding='utf-8') as f:
-            json.dump(basic_profile.to_dict(), f, ensure_ascii=False, indent=2)
+        # Save to disk (safe indexed storage)
+        path = StyleLearner.save_profile(basic_profile, character_id)
             
         logger.info(f"✅ 基于 LLM 的3000条记录深度综合提取完成，已保存至 {path} ！")
         return basic_profile
