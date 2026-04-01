@@ -196,11 +196,23 @@ class EmotionEngine:
         # char_id must already be sanitized before calling _path
         return DATA_DIR / f"{char_id}.json"
 
-    def load(self, char_id: str) -> EmotionState:
-        # Sanitize + use os.path.basename to strip any directory separators
+    def _safe_path(self, char_id: str) -> Optional[Path]:
+        """Return a path confined to DATA_DIR, or None if confinement fails."""
+        # Double-sanitize: regex strip + basename to eliminate any path separators
         safe_id = os.path.basename(_sanitize_char_id(char_id))
         path = DATA_DIR / f"{safe_id}.json"
-        if path.exists():
+        # Runtime confinement guard: raises ValueError if path escapes DATA_DIR
+        try:
+            path.resolve().relative_to(DATA_DIR.resolve())
+        except ValueError:
+            logger.warning(f"路径越界检测：{char_id!r} 被拒绝")
+            return None
+        return path
+
+    def load(self, char_id: str) -> EmotionState:
+        safe_id = os.path.basename(_sanitize_char_id(char_id))
+        path = self._safe_path(safe_id)
+        if path is not None and path.exists():
             try:
                 data = json.loads(path.read_text(encoding="utf-8"))
                 return EmotionState.from_dict(data)
@@ -210,7 +222,9 @@ class EmotionEngine:
 
     def save(self, state: EmotionState) -> None:
         safe_id = os.path.basename(_sanitize_char_id(state.char_id))
-        path = DATA_DIR / f"{safe_id}.json"
+        path = self._safe_path(safe_id)
+        if path is None:
+            return
         try:
             path.write_text(json.dumps(state.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
         except Exception as exc:
