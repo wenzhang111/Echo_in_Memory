@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import math
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -196,8 +197,9 @@ class EmotionEngine:
         return DATA_DIR / f"{char_id}.json"
 
     def load(self, char_id: str) -> EmotionState:
-        safe_id = _sanitize_char_id(char_id)
-        path = self._path(safe_id)
+        # Sanitize + use os.path.basename to strip any directory separators
+        safe_id = os.path.basename(_sanitize_char_id(char_id))
+        path = DATA_DIR / f"{safe_id}.json"
         if path.exists():
             try:
                 data = json.loads(path.read_text(encoding="utf-8"))
@@ -207,8 +209,8 @@ class EmotionEngine:
         return EmotionState(char_id=safe_id)
 
     def save(self, state: EmotionState) -> None:
-        safe_id = _sanitize_char_id(state.char_id)
-        path = self._path(safe_id)
+        safe_id = os.path.basename(_sanitize_char_id(state.char_id))
+        path = DATA_DIR / f"{safe_id}.json"
         try:
             path.write_text(json.dumps(state.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
         except Exception as exc:
