@@ -174,12 +174,26 @@ class EmotionState:
         }
 
 
+import re as _re
+
+# Maximum allowed length for a char_id used in file paths
+_CHAR_ID_MAX_LEN = 64
+_CHAR_ID_SAFE_RE = _re.compile(r"[^a-zA-Z0-9_\-]")
+
+
+def _sanitize_char_id(char_id: str) -> str:
+    """Sanitize char_id to prevent path traversal: allow only alphanumerics, underscores, hyphens."""
+    safe = _CHAR_ID_SAFE_RE.sub("_", str(char_id))
+    return safe[:_CHAR_ID_MAX_LEN] if safe else "default"
+
+
 class EmotionEngine:
     """情感引擎 - 加载/保存/更新每个角色的情绪状态"""
 
     @staticmethod
     def _path(char_id: str) -> Path:
-        return DATA_DIR / f"{char_id}.json"
+        safe_id = _sanitize_char_id(char_id)
+        return DATA_DIR / f"{safe_id}.json"
 
     def load(self, char_id: str) -> EmotionState:
         path = self._path(char_id)
