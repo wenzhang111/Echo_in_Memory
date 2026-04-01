@@ -27,6 +27,14 @@ class AssistantSkill:
 
 class FunctionalAssistantHub:
     """模块化功能助手：统一技能注册、发现、执行。"""
+    INTENT_SKILL_MAPPING: Dict[str, List[str]] = {
+        "planning_task": ["daily_briefing", "anniversary_upcoming"],
+        "advice_request": ["intent_detect", "memory_snapshot"],
+        "emotional_support": ["emotion_snapshot", "topic_suggestion"],
+        "relationship_talk": ["topic_suggestion", "memory_snapshot"],
+        "knowledge_query": ["intent_detect"],
+        "casual_chat": ["topic_suggestion"],
+    }
 
     def __init__(
         self,
@@ -71,15 +79,7 @@ class FunctionalAssistantHub:
 
     def suggest(self, message: str) -> Dict[str, Any]:
         intent = self.intent_classifier.detect(message)
-        mapping = {
-            "planning_task": ["daily_briefing", "anniversary_upcoming"],
-            "advice_request": ["intent_detect", "memory_snapshot"],
-            "emotional_support": ["emotion_snapshot", "topic_suggestion"],
-            "relationship_talk": ["topic_suggestion", "memory_snapshot"],
-            "knowledge_query": ["intent_detect"],
-            "casual_chat": ["topic_suggestion"],
-        }
-        recommended = mapping.get(intent.intent, ["topic_suggestion"])
+        recommended = self.INTENT_SKILL_MAPPING.get(intent.intent, ["topic_suggestion"])
         return {
             "intent": intent.to_dict(),
             "recommended_skills": recommended,

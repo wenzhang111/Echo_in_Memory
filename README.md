@@ -152,9 +152,33 @@ python run_server.py
 - `GET /topic/suggest`
 - `POST /topic/proactive/trigger`
 
+### 功能助手（模块化）
+
+- `GET /assistant/skills`（查看已注册技能）
+- `POST /assistant/execute`（统一执行技能）
+- `POST /assistant/suggest`（根据输入推荐技能）
+
+内置技能（可扩展）：
+- `topic_suggestion` 话题建议
+- `daily_briefing` 每日通报
+- `intent_detect` 意图识别
+- `emotion_snapshot` 情绪快照
+- `anniversary_upcoming` 纪念日提醒
+- `memory_snapshot` 记忆摘要
+
+扩展方式：在 `assistant_skills.py` 中新增 `AssistantSkill` 并注册到 `FunctionalAssistantHub`。
+
 ### 评估
 
 - `GET /metrics/summary`（记忆命中率/误召回率/纠错率 + 风格相似度/一致性/满意度代理）
+
+## 6.1 简单桌宠
+
+Web UI 内置一个轻量桌宠（右下角悬浮）：
+
+- 可拖拽
+- 单击随机鼓励文案
+- 双击快速调用助手技能生成话题建议
 
 ### 管理
 
