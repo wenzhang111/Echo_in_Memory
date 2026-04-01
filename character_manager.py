@@ -204,6 +204,17 @@ class Character:
 4. **保持人设**: 始终保持上述性格和说话风格
 5. **风格模仿**: 如果有"从聊天记录中学习到的语言风格"，请严格模仿那些语言习惯（口头禅、语气词、表情使用等）
 """
+        try:
+            if profile and profile.sample_count > 0:
+                strength = getattr(profile, "style_strength", "natural")
+                prompt += f"\n6. **风格强度档位**: 当前档位为 {strength}，在保证自然对话的前提下遵循该档位执行风格。"
+                negative = getattr(profile, "negative_constraints", []) or []
+                if negative:
+                    prompt += "\n7. **负向约束**:\n"
+                    for idx, item in enumerate(negative[:8], 1):
+                        prompt += f"   - {idx}) {item}\n"
+        except Exception:
+            pass
         return prompt
 
 

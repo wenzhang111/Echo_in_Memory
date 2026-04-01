@@ -39,6 +39,10 @@ class StyleProfile:
         self.ending_styles: Dict[str, int] = {}
         self.signature_sentences: List[str] = []
         self.style_tags: List[str] = []
+        self.scene_profiles: Dict[str, Dict] = {}
+        self.style_strength: str = "natural"
+        self.negative_constraints: List[str] = []
+        self.drift_score: float = 0.0
 
         self.sample_count: int = 0
         self.analyzed_at: str = ""
@@ -63,6 +67,7 @@ class StyleProfile:
 
         if self.style_tags:
             lines.append(f"- 风格标签: {'、'.join(self.style_tags[:6])}")
+        lines.append(f"- 风格强度: {self.style_strength}")
 
         if self.avg_length > 0:
             lines.append(
@@ -87,6 +92,9 @@ class StyleProfile:
             lines.append("- 代表性原句（模仿节奏，不要逐字复读）:")
             for i, sent in enumerate(self.signature_sentences[:8], 1):
                 lines.append(f"  {i}) {sent}")
+
+        if self.negative_constraints:
+            lines.append(f"- 避免表达: {'；'.join(self.negative_constraints[:8])}")
 
         lines.append("- 模仿要求: 保持口语化、生活化，优先短句，避免书面腔和模板化回答")
         return "\n".join(lines)
@@ -117,6 +125,13 @@ class StyleLearner:
         r'[\U0001F300-\U0001FAFF]'
         r'|\[[^\[\]]{1,10}\]'
     )
+    SCENE_MARKERS = {
+        "comfort": ["难受", "难过", "崩溃", "焦虑", "压力", "委屈", "哭"],
+        "intimate": ["想你", "爱你", "亲亲", "抱抱", "宝宝", "宝贝"],
+        "daily": ["今天", "刚刚", "现在", "晚上", "吃饭", "上班"],
+        "conflict": ["生气", "讨厌", "烦", "别", "不想理", "算了"],
+        "goodnight": ["晚安", "睡觉", "休息", "做梦", "明天见"],
+    }
 
     def analyze(self, ai_responses: List[str]) -> StyleProfile:
         profile = StyleProfile()
@@ -324,6 +339,8 @@ class StyleLearner:
 
     def analyze_and_save(self, ai_responses: List[str], character_id: str = "default") -> StyleProfile:
         profile = self.analyze(ai_responses)
+        profile.style_strength = self._infer_style_strength(profile)
+        profile.negative_constraints = self._build_negative_constraints(profile)
         path = STYLE_DIR / f"{character_id}.json"
         with open(path, 'w', encoding='utf-8') as f:
             json.dump(profile.to_dict(), f, ensure_ascii=False, indent=2)
@@ -351,7 +368,101 @@ class StyleLearner:
             return StyleProfile()
 
         logger.info(f"开始学习角色 {character_id} 的语言风格 ({len(ai_responses)} 条记录)...")
-        return self.analyze_and_save(ai_responses, character_id)
+        profile = self.analyze_and_save(ai_responses, character_id)
+        profile.scene_profiles = self.analyze_by_scene(pairs)
+        profile.drift_score = self.detect_style_drift(profile, ai_responses[-30:])
+        path = STYLE_DIR / f"{character_id}.json"
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump(profile.to_dict(), f, ensure_ascii=False, indent=2)
+        return profile
+
+    def analyze_by_scene(self, pairs: List[Dict]) -> Dict[str, Dict]:
+        buckets: Dict[str, List[str]] = {k: [] for k in self.SCENE_MARKERS.keys()}
+        buckets["generic"] = []
+        for p in pairs:
+            user_msg = self._clean_response(str(p.get("user_message", "")))
+            ai_msg = self._clean_response(str(p.get("ai_response", "")))
+            if not ai_msg:
+                continue
+            assigned = False
+            for scene, markers in self.SCENE_MARKERS.items():
+                if any(m in user_msg for m in markers):
+                    buckets[scene].append(ai_msg)
+                    assigned = True
+                    break
+            if not assigned:
+                buckets["generic"].append(ai_msg)
+
+        result: Dict[str, Dict] = {}
+        for scene, responses in buckets.items():
+            if len(responses) < 5:
+                continue
+            scene_profile = self.analyze(responses)
+            result[scene] = {
+                "sample_count": scene_profile.sample_count,
+                "avg_length": scene_profile.avg_length,
+                "catchphrases": scene_profile.catchphrases[:5],
+                "tone_particles": dict(sorted(scene_profile.tone_particles.items(), key=lambda x: -x[1])[:5]),
+            }
+        return result
+
+    def detect_style_drift(self, baseline: StyleProfile, recent_responses: List[str]) -> float:
+        if not recent_responses:
+            return 0.0
+        current = self.analyze(recent_responses)
+        particle_drift = self._jaccard_distance(
+            list(baseline.tone_particles.keys())[:6],
+            list(current.tone_particles.keys())[:6],
+        )
+        catchphrase_drift = self._jaccard_distance(
+            baseline.catchphrases[:6],
+            current.catchphrases[:6],
+        )
+        length_base = baseline.avg_length or 1.0
+        length_drift = min(1.0, abs(current.avg_length - baseline.avg_length) / length_base)
+        return round((particle_drift + catchphrase_drift + length_drift) / 3.0, 4)
+
+    @staticmethod
+    def _jaccard_distance(a: List[str], b: List[str]) -> float:
+        sa, sb = set(a), set(b)
+        if not sa and not sb:
+            return 0.0
+        union = len(sa | sb)
+        if union == 0:
+            return 0.0
+        return 1.0 - (len(sa & sb) / union)
+
+    @staticmethod
+    def _infer_style_strength(profile: StyleProfile) -> str:
+        strong_hits = 0
+        if profile.flirt_level >= 0.22:
+            strong_hits += 1
+        if profile.humor_level >= 0.20:
+            strong_hits += 1
+        if len(profile.catchphrases) >= 6:
+            strong_hits += 1
+        if profile.short_ratio >= 0.65:
+            strong_hits += 1
+        if strong_hits >= 3:
+            return "strong"
+        if strong_hits <= 1:
+            return "natural"
+        return "balanced"
+
+    @staticmethod
+    def _build_negative_constraints(profile: StyleProfile) -> List[str]:
+        constraints = [
+            "避免客服腔（如“亲，这边建议”）",
+            "避免生硬条列式说教",
+            "避免过度重复同一句口头禅",
+        ]
+        if profile.short_ratio >= 0.7:
+            constraints.append("避免突然输出超长大段说明文")
+        if profile.flirt_level < 0.08:
+            constraints.append("避免突兀高浓度亲密称呼")
+        if profile.humor_level < 0.08:
+            constraints.append("避免刻意网络梗堆砌")
+        return constraints
 
 
 style_learner = StyleLearner()

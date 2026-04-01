@@ -51,6 +51,11 @@ class LongTermMemoryManager:
         self.commitment_words = [
             '喜欢你', '爱你', '只想跟你', '只跟你', '只要你', '不想失去你'
         ]
+        self.memory_tier_rules = {
+            "short_term": {"max_age_days": 3, "min_ref_count": 0},
+            "mid_term": {"max_age_days": 30, "min_ref_count": 1},
+            "long_term": {"max_age_days": 99999, "min_ref_count": 2},
+        }
 
     @staticmethod
     def _clean_text(text: str) -> str:
@@ -356,20 +361,20 @@ class LongTermMemoryManager:
         """
         context = "## 我对你的了解 ##\n"
         
-        important_memories = db.get_memories_by_category('relationship')[:4]
+        important_memories = self._rank_memories(db.get_memories_by_category('relationship'))[:4]
         
         if important_memories:
             context += "### 关于我们的关系 ###\n"
             for mem in important_memories:
                 context += f"- {mem['content']}\n"
         
-        preference_memories = db.get_memories_by_category('preference')[:6]
+        preference_memories = self._rank_memories(db.get_memories_by_category('preference'))[:6]
         if preference_memories:
             context += "\n### 你的喜好 ###\n"
             for mem in preference_memories:
                 context += f"- {mem['content']}\n"
         
-        experience_memories = db.get_memories_by_category('experience')[:6]
+        experience_memories = self._rank_memories(db.get_memories_by_category('experience'))[:6]
         if experience_memories:
             context += "\n### 时间线里的你 ###\n"
             for mem in experience_memories:
@@ -384,7 +389,8 @@ class LongTermMemoryManager:
         """
         搜索相关的记忆
         """
-        return db.search_memories(keyword)
+        results = db.search_memories(keyword)
+        return self._rank_memories(results)
     
     def get_personality_summary(self) -> str:
         """
@@ -484,6 +490,62 @@ class LongTermMemoryManager:
         )
         conn.commit()
         conn.close()
+    
+    def _classify_memory_tier(self, memory: Dict) -> str:
+        ts = memory.get("last_updated") or memory.get("created_at")
+        ref_count = int(memory.get("reference_count", 0) or 0)
+        age_days = 99999
+        if ts:
+            try:
+                age_days = max(0, (datetime.now() - datetime.fromisoformat(str(ts).replace("Z", ""))).days)
+            except Exception:
+                age_days = 99999
+        if age_days <= self.memory_tier_rules["short_term"]["max_age_days"]:
+            return "short_term"
+        if age_days <= self.memory_tier_rules["mid_term"]["max_age_days"] or ref_count >= self.memory_tier_rules["mid_term"]["min_ref_count"]:
+            return "mid_term"
+        return "long_term"
+
+    def _calculate_memory_score(self, memory: Dict) -> float:
+        importance = float(memory.get("importance_score", 0.5) or 0.5)
+        ref_count = int(memory.get("reference_count", 0) or 0)
+        recency = 0.2
+        ts = memory.get("last_updated") or memory.get("created_at")
+        if ts:
+            try:
+                age_days = max(0, (datetime.now() - datetime.fromisoformat(str(ts).replace("Z", ""))).days)
+                recency = max(0.1, min(1.0, 1.0 - min(age_days, 120) / 120))
+            except Exception:
+                pass
+        frequency = max(0.1, min(1.0, ref_count / 8 if ref_count > 0 else 0.1))
+        emotion = 0.5
+        content = str(memory.get("content", ""))
+        if any(k in content for k in ["爱", "想你", "难受", "开心", "崩溃", "感谢", "委屈"]):
+            emotion = 0.9
+        tier = self._classify_memory_tier(memory)
+        tier_boost = {"short_term": 1.05, "mid_term": 1.0, "long_term": 0.95}.get(tier, 1.0)
+        composite = (importance * 0.45 + recency * 0.2 + emotion * 0.2 + frequency * 0.15) * tier_boost
+        return round(min(1.0, max(0.0, composite)), 4)
+
+    def _rank_memories(self, memories: List[Dict], emotion_priority: bool = False) -> List[Dict]:
+        ranked = []
+        for m in memories or []:
+            item = dict(m)
+            item["memory_tier"] = self._classify_memory_tier(item)
+            item["composite_score"] = self._calculate_memory_score(item)
+            if emotion_priority and any(k in str(item.get("content", "")) for k in ["爱", "想你", "难受", "开心", "崩溃", "委屈"]):
+                item["composite_score"] = round(min(1.0, item["composite_score"] + 0.08), 4)
+            ranked.append(item)
+        ranked.sort(key=lambda x: (x.get("composite_score", 0), x.get("importance_score", 0)), reverse=True)
+        return ranked
+
+    def get_ranked_memories(self, category: Optional[str] = None, limit: int = 50, emotion_priority: bool = False) -> List[Dict]:
+        categories = [category] if category else ["relationship", "preference", "experience", "important_info", "personality"]
+        merged: List[Dict] = []
+        for cat in categories:
+            for m in db.get_memories_by_category(cat):
+                merged.append({**m, "category": cat})
+        return self._rank_memories(merged, emotion_priority=emotion_priority)[:max(1, limit)]
 
     def compress_old_memories(self, category: str = None, max_per_key_prefix: int = 2) -> int:
         """

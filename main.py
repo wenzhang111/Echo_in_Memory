@@ -93,6 +93,11 @@ class MemoryCorrectionRequest(BaseModel):
     correction_reason: str = ""
 
 
+class StyleControlRequest(BaseModel):
+    style_strength: Optional[str] = None
+    negative_constraints: Optional[List[str]] = None
+
+
 class DailyTodoItem(BaseModel):
     title: str
     time_hint: str = ""
@@ -465,19 +470,12 @@ async def get_memory_context():
 
 
 @app.get("/memory/all")
-async def get_all_memories(category: str = None, limit: int = 50):
-    if category:
-        memories = [
-            {**m, "category": category}
-            for m in db.get_memories_by_category(category)[:limit]
-        ]
-    else:
-        memories = []
-        categories = ["personality", "relationship", "experience", "preference", "important_info"]
-        per_cat = max(5, limit // len(categories))
-        for cat in categories:
-            cat_memories = db.get_memories_by_category(cat)[:per_cat]
-            memories.extend([{**m, "category": cat} for m in cat_memories])
+async def get_all_memories(category: str = None, limit: int = 50, emotion_priority: bool = False):
+    memories = memory_manager.get_ranked_memories(
+        category=category,
+        limit=limit,
+        emotion_priority=emotion_priority,
+    )
     return {"total": len(memories), "memories": memories}
 
 
@@ -544,6 +542,41 @@ async def correct_memory_item(data: MemoryCorrectionRequest):
     return {
         "status": "success",
         "message": "记忆已纠错",
+        "before": memory,
+        "after": db.get_memory_by_id(data.memory_id),
+    }
+
+
+@app.post("/memory/correct-priority")
+async def correct_memory_item_priority(data: MemoryCorrectionRequest):
+    memory = db.get_memory_by_id(data.memory_id)
+    if not memory:
+        raise HTTPException(status_code=404, detail="记忆不存在")
+
+    corrected = (data.corrected_content or "").strip()
+    if not corrected:
+        raise HTTPException(status_code=400, detail="corrected_content 不能为空")
+
+    db.update_long_term_memory(
+        memory_id=data.memory_id,
+        content=corrected,
+        importance_score=0.99,
+    )
+    db.increment_memory_reference(data.memory_id)
+    db.increment_memory_reference(data.memory_id)
+
+    reason = (data.correction_reason or "").strip() or "未提供原因"
+    db.add_long_term_memory(
+        category="important_info",
+        key=f"priority_fix_{data.memory_id}",
+        content=f"用户通过高优先通道纠错记忆#{data.memory_id}：{reason}",
+        importance_score=0.99,
+    )
+
+    return {
+        "status": "success",
+        "priority": "high",
+        "message": "高优先纠错已生效",
         "before": memory,
         "after": db.get_memory_by_id(data.memory_id),
     }
@@ -882,6 +915,75 @@ async def get_style_profile(character_id: str = None):
         "character_id": cid,
         "profile": profile.to_dict(),
         "prompt_preview": profile.to_prompt(),
+    }
+
+
+@app.put("/style/control")
+async def update_style_control(data: StyleControlRequest, character_id: str = None):
+    cid = character_id or character_manager.get_active_id()
+    profile = StyleLearner.load_profile(cid)
+    if not profile:
+        raise HTTPException(status_code=404, detail="风格档案不存在，请先学习风格")
+
+    allowed = {"natural", "balanced", "strong"}
+    if data.style_strength is not None:
+        if data.style_strength not in allowed:
+            raise HTTPException(status_code=400, detail=f"style_strength 必须是 {sorted(list(allowed))}")
+        profile.style_strength = data.style_strength
+    if data.negative_constraints is not None:
+        profile.negative_constraints = [x.strip() for x in data.negative_constraints if str(x).strip()][:12]
+
+    from style_learner import STYLE_DIR
+    style_path = STYLE_DIR / f"{cid}.json"
+    with open(style_path, "w", encoding="utf-8") as f:
+        json.dump(profile.to_dict(), f, ensure_ascii=False, indent=2)
+
+    return {"status": "success", "character_id": cid, "profile": profile.to_dict()}
+
+
+@app.get("/metrics/summary")
+async def get_metrics_summary(character_id: str = None, window_days: int = 7):
+    cid = character_id or character_manager.get_active_id()
+    all_memories = memory_manager.get_ranked_memories(limit=10000)
+    if all_memories:
+        used = sum(1 for m in all_memories if int(m.get("reference_count", 0) or 0) > 0)
+        correction = sum(1 for m in all_memories if str(m.get("key", "")).startswith(("memory_fix_", "priority_fix_")))
+        memory_hit_rate = round(used / len(all_memories), 4)
+        correction_rate = round(correction / len(all_memories), 4)
+        memory_misrecall_rate = correction_rate
+    else:
+        memory_hit_rate = 0.0
+        correction_rate = 0.0
+        memory_misrecall_rate = 0.0
+
+    pairs = db.get_conversation_pairs(limit=300, character_id=cid)
+    profile = StyleLearner.load_profile(cid)
+    style_similarity = 0.0
+    style_consistency = 0.0
+    user_satisfaction_proxy = 0.5
+    if profile:
+        learner = StyleLearner()
+        recent_ai = [p["ai_response"] for p in pairs[:60] if p.get("ai_response")]
+        if recent_ai:
+            style_similarity = round(max(0.0, 1.0 - learner.detect_style_drift(profile, recent_ai)), 4)
+            style_consistency = round(max(0.0, 1.0 - learner.detect_style_drift(profile, recent_ai[:20])), 4)
+            user_satisfaction_proxy = round(max(0.0, min(1.0, 1.0 - memory_misrecall_rate * 0.6)), 4)
+
+    return {
+        "status": "success",
+        "character_id": cid,
+        "window_days": window_days,
+        "memory_metrics": {
+            "memory_hit_rate": memory_hit_rate,
+            "memory_misrecall_rate": memory_misrecall_rate,
+            "user_correction_rate": correction_rate,
+        },
+        "style_metrics": {
+            "style_similarity": style_similarity,
+            "style_consistency": style_consistency,
+            "user_satisfaction_proxy": user_satisfaction_proxy,
+        },
+        "weekly_regression_recommendation": "建议每周固定时间调用本接口并记录趋势用于回归对比",
     }
 
 
