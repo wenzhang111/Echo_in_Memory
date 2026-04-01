@@ -4,7 +4,7 @@
 import logging
 import re
 from typing import List, Dict, Optional, Set, Tuple
-from datetime import datetime
+from datetime import datetime, timedelta
 import json
 import sys
 from pathlib import Path
@@ -436,7 +436,7 @@ class LongTermMemoryManager:
         """
         conn = db.get_connection()
         cursor = conn.cursor()
-        cutoff_ts = (datetime.now() - __import__("datetime").timedelta(days=age_days)).isoformat()
+        cutoff_ts = (datetime.now() - timedelta(days=age_days)).isoformat()
         cursor.execute(
             """
             SELECT id, importance_score FROM long_term_memories

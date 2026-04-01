@@ -15,8 +15,8 @@ const PRECACHE_URLS = [
 self.addEventListener("install", (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(PRECACHE_URLS).catch(() => {
-        // 预缓存失败不阻断安装
+      return cache.addAll(PRECACHE_URLS).catch((err) => {
+        console.warn("[SW] 预缓存失败:", err);
       });
     })
   );

@@ -1568,12 +1568,12 @@
                             speakBtn.onclick = () => speakText(finalText, speakBtn);
                             timeRow.appendChild(timeDiv);
                             timeRow.appendChild(speakBtn);
-                            const wrapper = msgContent.closest('.message-wrapper');
-                            if (wrapper) {
-                                const contentDiv = msgContent.parentElement;
-                                // Remove old time div if any
-                                const oldTime = contentDiv.querySelector('.message-time');
-                                if (oldTime) oldTime.remove();
+                            const contentDiv = msgContent.parentElement;
+                            if (contentDiv) {
+                                // Remove any existing time elements (plain div or time-row) appended during streaming
+                                Array.from(contentDiv.children).forEach(child => {
+                                    if (child !== msgContent) child.remove();
+                                });
                                 contentDiv.appendChild(timeRow);
                             }
                             
@@ -2796,8 +2796,8 @@
             utter.pitch = 1.1;
             // 选择女声（如果可用）
             const voices = window.speechSynthesis.getVoices();
-            const zhVoice = voices.find(v => v.lang.startsWith('zh') && v.name.toLowerCase().includes('female'))
-                         || voices.find(v => v.lang.startsWith('zh'));
+            const zhVoices = voices.filter(v => v.lang.startsWith('zh'));
+            const zhVoice = zhVoices.find(v => v.name.toLowerCase().includes('female')) || zhVoices[0];
             if (zhVoice) utter.voice = zhVoice;
             if (btn) {
                 btn.textContent = '⏹️';
@@ -2960,8 +2960,8 @@
         // ==================== PWA Service Worker 注册 ====================
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('/static/sw.js').catch(() => {
-                    // SW 注册失败不影响页面功能
+                navigator.serviceWorker.register('/static/sw.js').catch((err) => {
+                    console.warn('[SW] 注册失败:', err);
                 });
             });
         }

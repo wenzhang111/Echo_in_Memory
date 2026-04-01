@@ -51,10 +51,12 @@ class Anniversary:
         self.created_at = created_at or datetime.now().isoformat()
         self.builtin = builtin
 
-    # ── Validation ─────────────────────────────────────────────────────────
+    # Validation ─────────────────────────────────────────────────────────────
     def is_valid(self) -> bool:
+        # Use a known leap year (2024) so Feb 29 is accepted as a valid recurring date
+        LEAP_YEAR_FOR_VALIDATION = 2024
         try:
-            date(2024, self.month, self.day)   # 用闰年检测 2 月 29
+            date(LEAP_YEAR_FOR_VALIDATION, self.month, self.day)
             return True
         except ValueError:
             return False
