@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Dict, List
 
 from topic_initiator import get_external_context, get_time_context
+from anniversary_manager import anniversary_manager
 
 DATA_DIR = Path(__file__).parent / "data"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -168,11 +169,14 @@ class DailyBriefingManager:
         else:
             todo_line = "今天暂时没有预设待办，我们可以一起临时安排。"
 
+        # 纪念日提醒（3 天内）
+        anniversary_line = anniversary_manager.build_upcoming_notice(within_days=3)
+
         quote = ext.get("hitokoto", "").strip()
         quote_line = f"顺便分享一句：\"{quote}\"。" if quote else ""
 
         closing = random.choice(CLOSINGS)
-        message = "\n".join([x for x in [time_line, weather_line, todo_line, quote_line, closing] if x])
+        message = "\n".join([x for x in [time_line, weather_line, todo_line, anniversary_line, quote_line, closing] if x])
 
         return {
             "date": self._today_str(now),

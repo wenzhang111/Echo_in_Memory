@@ -4,6 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>言忆 - AI角色记忆系统</title>
+    <!-- PWA meta -->
+    <meta name="theme-color" content="#667eea">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="言忆">
+    <link rel="manifest" href="/static/manifest.json">
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
@@ -403,6 +410,55 @@
         @keyframes blink {
             50% { opacity: 0; }
         }
+
+        /* Emotion badge */
+        .emotion-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 2px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+            background: rgba(255,255,255,0.25);
+            color: white;
+            border: 1px solid rgba(255,255,255,0.4);
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .emotion-badge:hover { background: rgba(255,255,255,0.35); }
+
+        /* Voice buttons */
+        .btn-voice {
+            background: linear-gradient(135deg, #43e97b, #38f9d7);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            padding: 8px 12px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: opacity 0.2s;
+            flex-shrink: 0;
+        }
+        .btn-voice:hover { opacity: 0.85; }
+        .btn-voice.recording {
+            background: linear-gradient(135deg, #f5576c, #f093fb);
+            animation: voicePulse 1s infinite;
+        }
+        @keyframes voicePulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.08); }
+        }
+        .btn-speak {
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-size: 13px;
+            color: #aaa;
+            padding: 2px 4px;
+            margin-left: 4px;
+        }
+        .btn-speak:hover { color: #667eea; }
         
         @media (max-width: 768px) {
             .message-wrapper {
@@ -558,6 +614,10 @@
             <div id="characterBar" class="mt-4 flex items-center justify-center gap-2 flex-wrap">
                 <!-- 角色卡片由 JS 动态渲染 -->
             </div>
+            <!-- 情绪状态 badge -->
+            <div class="mt-2 flex items-center justify-center gap-3">
+                <span id="emotionBadge" class="emotion-badge" onclick="goTab('chat')" title="当前角色情绪状态，点击进入对话">😊 开心</span>
+            </div>
             <div class="mt-3 flex items-center justify-center gap-4">
                 <p class="text-white text-sm opacity-75">当前模型: <span id="modelStatus" class="font-bold">加载中...</span></p>
                 <select id="modelSelectHeader" class="px-4 py-2 rounded-lg bg-white bg-opacity-20 text-white cursor-pointer border border-white border-opacity-30" onchange="switchModelFromHeader()">
@@ -589,6 +649,7 @@
                 <button class="tab-button" onclick="switchTab('import', this)">📥 导入</button>
                 <button class="tab-button" onclick="switchTab('memory', this)">🧠 记忆</button>
                 <button class="tab-button" onclick="switchTab('personality', this)">🧩 角色</button>
+                <button class="tab-button" onclick="switchTab('anniversaries', this)">🎂 纪念日</button>
                 <button class="tab-button" onclick="switchTab('stats', this)">📊 统计</button>
                 <button class="tab-button" onclick="switchTab('settings', this)">⚙️ 设置</button>
             </div>
@@ -682,6 +743,7 @@
                                 placeholder="输入你的消息..."
                                 onkeypress="handleKeyPress(event)"
                             >
+                            <button id="voiceBtn" class="btn-voice" onclick="toggleVoiceInput()" title="语音输入（按住说话）">🎤</button>
                             <button class="btn-primary px-8" onclick="sendMessage()">发送</button>
                         </div>
                         
@@ -1065,6 +1127,59 @@
                         <button class="btn-primary w-full" onclick="saveAllSettings()">💾 保存所有设置</button>
                     </div>
                 </div>
+
+                <!-- 纪念日标签页 -->
+                <div id="anniversaries" class="tab-content">
+                    <h3 class="text-2xl font-bold mb-2">🎂 纪念日与节日提醒</h3>
+                    <p class="text-sm text-gray-600 mb-4">管理你的纪念日，系统会在每日通报中自动提醒即将到来的日期。</p>
+
+                    <!-- 即将到来 -->
+                    <div id="upcomingAnniversaries" class="mb-6 p-4 bg-pink-50 border border-pink-200 rounded-xl hidden">
+                        <h4 class="font-bold text-pink-700 mb-2">⏰ 近期即将到来</h4>
+                        <div id="upcomingList"></div>
+                    </div>
+
+                    <!-- 添加新纪念日 -->
+                    <div class="bg-white border rounded-xl p-5 mb-5">
+                        <h4 class="font-bold mb-3">➕ 添加新纪念日</h4>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-sm font-semibold mb-1">名称 *</label>
+                                <input id="annTitle" type="text" class="input-field" placeholder="例：恋爱纪念日">
+                            </div>
+                            <div class="flex gap-2">
+                                <div class="flex-1">
+                                    <label class="block text-sm font-semibold mb-1">月份 *</label>
+                                    <input id="annMonth" type="number" class="input-field" min="1" max="12" placeholder="月">
+                                </div>
+                                <div class="flex-1">
+                                    <label class="block text-sm font-semibold mb-1">日期 *</label>
+                                    <input id="annDay" type="number" class="input-field" min="1" max="31" placeholder="日">
+                                </div>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-semibold mb-1">备注（可选）</label>
+                                <input id="annDesc" type="text" class="input-field" placeholder="简短描述">
+                            </div>
+                            <div>
+                                <label class="flex items-center gap-2 mt-5 cursor-pointer">
+                                    <input id="annRecurring" type="checkbox" checked>
+                                    <span class="text-sm font-semibold">每年重复</span>
+                                </label>
+                            </div>
+                        </div>
+                        <button class="btn-primary mt-4" onclick="createAnniversary()">💾 保存纪念日</button>
+                    </div>
+
+                    <!-- 列表 -->
+                    <div>
+                        <div class="flex items-center justify-between mb-3">
+                            <h4 class="font-bold">📋 全部纪念日</h4>
+                            <button class="btn-secondary text-xs px-3 py-1" onclick="loadAnniversaries()">🔄 刷新</button>
+                        </div>
+                        <div id="anniversaryList" class="space-y-2">加载中...</div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -1116,6 +1231,8 @@
             loadTopicSuggestion();
             loadDailyTodos();
             refreshDataScopeSummary();
+            // 加载情绪状态
+            loadEmotionState();
             // 检查服务状态
             checkServiceStatus();
             // 每10秒检查一次服务状态
@@ -1285,6 +1402,7 @@
             else if (tabName === 'stats') loadStats();
             else if (tabName === 'personality') loadPersonality();
             else if (tabName === 'settings') refreshDataScopeSummary();
+            else if (tabName === 'anniversaries') loadAnniversaries();
         }
         
         function switchMemoryView(viewName) {
@@ -1431,6 +1549,34 @@
                             // 去掉光标，显示最终文本
                             msgContent.textContent = payload.full_response || fullText;
                             
+                            // 更新情绪 badge
+                            if (payload.emotion) updateEmotionBadge(payload.emotion);
+
+                            // 添加 TTS 按钮
+                            const finalText = payload.full_response || fullText;
+                            const timeRow = document.createElement('div');
+                            timeRow.style.display = 'flex';
+                            timeRow.style.alignItems = 'center';
+                            timeRow.style.gap = '4px';
+                            const timeDiv = document.createElement('div');
+                            timeDiv.className = 'message-time';
+                            timeDiv.textContent = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+                            const speakBtn = document.createElement('button');
+                            speakBtn.className = 'btn-speak';
+                            speakBtn.title = '朗读此消息';
+                            speakBtn.textContent = '🔊';
+                            speakBtn.onclick = () => speakText(finalText, speakBtn);
+                            timeRow.appendChild(timeDiv);
+                            timeRow.appendChild(speakBtn);
+                            const wrapper = msgContent.closest('.message-wrapper');
+                            if (wrapper) {
+                                const contentDiv = msgContent.parentElement;
+                                // Remove old time div if any
+                                const oldTime = contentDiv.querySelector('.message-time');
+                                if (oldTime) oldTime.remove();
+                                contentDiv.appendChild(timeRow);
+                            }
+                            
                             // 记录到历史
                             const now = new Date();
                             messageHistory.push({ 
@@ -1482,6 +1628,7 @@
                 const reply = data.ai_response || data.response;
                 if (reply) {
                     addMessage(reply, 'ai');
+                    if (data.emotion) updateEmotionBadge(data.emotion);
                 } else {
                     addMessage('❌ API 未返回有效回复', 'error');
                 }
@@ -1518,12 +1665,28 @@
             msgContent.className = 'message-content';
             msgContent.textContent = content;
             
+            const timeRow = document.createElement('div');
+            timeRow.style.display = 'flex';
+            timeRow.style.alignItems = 'center';
+            timeRow.style.gap = '4px';
+            
             const timeDiv = document.createElement('div');
             timeDiv.className = 'message-time';
             timeDiv.textContent = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+            timeRow.appendChild(timeDiv);
+            
+            // Add TTS button for AI messages
+            if (role === 'ai') {
+                const speakBtn = document.createElement('button');
+                speakBtn.className = 'btn-speak';
+                speakBtn.title = '朗读此消息';
+                speakBtn.textContent = '🔊';
+                speakBtn.onclick = () => speakText(content, speakBtn);
+                timeRow.appendChild(speakBtn);
+            }
             
             contentDiv.appendChild(msgContent);
-            contentDiv.appendChild(timeDiv);
+            contentDiv.appendChild(timeRow);
             
             wrapper.appendChild(avatar);
             wrapper.appendChild(contentDiv);
@@ -2587,6 +2750,220 @@
 
         function hideTopicSuggestion() {
             document.getElementById('topicSuggestionBar').classList.add('hidden');
+        }
+
+        // ==================== 情绪状态 ====================
+        function updateEmotionBadge(emotion) {
+            if (!emotion) return;
+            const badge = document.getElementById('emotionBadge');
+            if (badge) {
+                badge.textContent = `${emotion.emoji || ''} ${emotion.label || ''}`;
+                badge.title = `当前情绪: ${emotion.summary || emotion.label || ''}\n点击进入对话`;
+            }
+        }
+
+        async function loadEmotionState() {
+            try {
+                const cid = activeCharacterId || 'default';
+                const resp = await fetch(`${API_BASE}/emotion/state?character_id=${cid}`);
+                const data = await resp.json();
+                if (data.status === 'success' && data.emotion) {
+                    updateEmotionBadge(data.emotion);
+                }
+            } catch (e) {
+                // 忽略，不影响功能
+            }
+        }
+
+        // ==================== 语音 TTS / STT ====================
+        let recognition = null;
+        let isRecording = false;
+
+        function speakText(text, btn) {
+            if (!('speechSynthesis' in window)) {
+                showToast('浏览器不支持语音合成', 'error');
+                return;
+            }
+            // 如果已在朗读则停止
+            if (window.speechSynthesis.speaking) {
+                window.speechSynthesis.cancel();
+                if (btn) btn.textContent = '🔊';
+                return;
+            }
+            const utter = new SpeechSynthesisUtterance(text);
+            utter.lang = 'zh-CN';
+            utter.rate = 1.0;
+            utter.pitch = 1.1;
+            // 选择女声（如果可用）
+            const voices = window.speechSynthesis.getVoices();
+            const zhVoice = voices.find(v => v.lang.startsWith('zh') && v.name.toLowerCase().includes('female'))
+                         || voices.find(v => v.lang.startsWith('zh'));
+            if (zhVoice) utter.voice = zhVoice;
+            if (btn) {
+                btn.textContent = '⏹️';
+                utter.onend = () => { btn.textContent = '🔊'; };
+                utter.onerror = () => { btn.textContent = '🔊'; };
+            }
+            window.speechSynthesis.speak(utter);
+        }
+
+        function toggleVoiceInput() {
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (!SpeechRecognition) {
+                showToast('浏览器不支持语音识别（推荐使用 Chrome）', 'error');
+                return;
+            }
+            const btn = document.getElementById('voiceBtn');
+            if (isRecording) {
+                if (recognition) recognition.stop();
+                return;
+            }
+            recognition = new SpeechRecognition();
+            recognition.lang = 'zh-CN';
+            recognition.continuous = false;
+            recognition.interimResults = false;
+            recognition.onstart = () => {
+                isRecording = true;
+                btn.classList.add('recording');
+                btn.textContent = '⏹️';
+            };
+            recognition.onresult = (event) => {
+                const transcript = event.results[0][0].transcript;
+                const input = document.getElementById('messageInput');
+                input.value = (input.value ? input.value + ' ' : '') + transcript;
+                input.focus();
+            };
+            recognition.onend = () => {
+                isRecording = false;
+                btn.classList.remove('recording');
+                btn.textContent = '🎤';
+            };
+            recognition.onerror = (e) => {
+                isRecording = false;
+                btn.classList.remove('recording');
+                btn.textContent = '🎤';
+                if (e.error !== 'no-speech') showToast('语音识别失败: ' + e.error, 'error');
+            };
+            recognition.start();
+        }
+
+        // ==================== 纪念日管理 ====================
+        async function loadAnniversaries() {
+            try {
+                const resp = await fetch(`${API_BASE}/anniversaries?include_builtin=true`);
+                const data = await resp.json();
+                renderAnniversaryList(data.anniversaries || []);
+            } catch (e) {
+                document.getElementById('anniversaryList').innerHTML = '<p class="text-red-500">加载失败</p>';
+            }
+            // 加载即将到来
+            try {
+                const resp2 = await fetch(`${API_BASE}/anniversaries/upcoming?within_days=7`);
+                const data2 = await resp2.json();
+                const upcoming = data2.anniversaries || [];
+                const container = document.getElementById('upcomingAnniversaries');
+                const list = document.getElementById('upcomingList');
+                if (upcoming.length > 0) {
+                    list.innerHTML = upcoming.map(a => {
+                        const d = a.days_until;
+                        const label = d === 0 ? '🎉 今天！' : d === 1 ? '明天' : `${d} 天后`;
+                        return `<div class="text-sm text-pink-800 py-1">
+                            <span class="font-bold">${a.title}</span>
+                            <span class="ml-2 text-pink-600">${a.next_occurrence || ''}</span>
+                            <span class="ml-2 font-semibold">${label}</span>
+                            ${a.description ? `<span class="ml-2 text-gray-500">${a.description}</span>` : ''}
+                        </div>`;
+                    }).join('');
+                    container.classList.remove('hidden');
+                } else {
+                    container.classList.add('hidden');
+                }
+            } catch (e) { /* ignore */ }
+        }
+
+        function renderAnniversaryList(items) {
+            const container = document.getElementById('anniversaryList');
+            if (!items.length) {
+                container.innerHTML = '<p class="text-gray-400 italic">暂无纪念日，点击上方添加。</p>';
+                return;
+            }
+            container.innerHTML = items.map(a => {
+                const d = a.days_until;
+                const badge = d === 0
+                    ? '<span class="text-xs bg-pink-500 text-white px-2 py-0.5 rounded-full ml-2">今天🎉</span>'
+                    : d !== null && d <= 7
+                        ? `<span class="text-xs bg-yellow-400 text-white px-2 py-0.5 rounded-full ml-2">${d}天后</span>`
+                        : '';
+                const isBuiltin = a.builtin ? '<span class="text-xs text-gray-400 ml-1">(内置)</span>' : '';
+                const deleteBtn = !a.builtin
+                    ? `<button class="text-xs text-red-400 hover:text-red-600" onclick="deleteAnniversary('${a.id}')">删除</button>`
+                    : '';
+                return `<div class="flex items-center justify-between p-3 bg-white border rounded-lg">
+                    <div>
+                        <span class="font-semibold">${a.title}${isBuiltin}</span>${badge}
+                        <span class="text-xs text-gray-500 ml-2">${a.month}月${a.day}日 ${a.recurring ? '(每年)' : (a.year ? a.year+'年' : '')}</span>
+                        ${a.description ? `<p class="text-xs text-gray-400 mt-0.5">${a.description}</p>` : ''}
+                    </div>
+                    <div class="flex gap-2">${deleteBtn}</div>
+                </div>`;
+            }).join('');
+        }
+
+        async function createAnniversary() {
+            const title = document.getElementById('annTitle').value.trim();
+            const month = parseInt(document.getElementById('annMonth').value);
+            const day = parseInt(document.getElementById('annDay').value);
+            const desc = document.getElementById('annDesc').value.trim();
+            const recurring = document.getElementById('annRecurring').checked;
+            if (!title || !month || !day) {
+                showToast('请填写名称、月份和日期', 'error');
+                return;
+            }
+            try {
+                const resp = await fetch(`${API_BASE}/anniversaries`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ title, month, day, recurring, description: desc })
+                });
+                const data = await resp.json();
+                if (data.status === 'success') {
+                    showToast('✓ 纪念日已保存', 'success');
+                    document.getElementById('annTitle').value = '';
+                    document.getElementById('annMonth').value = '';
+                    document.getElementById('annDay').value = '';
+                    document.getElementById('annDesc').value = '';
+                    await loadAnniversaries();
+                } else {
+                    showToast(data.detail || '保存失败', 'error');
+                }
+            } catch (e) {
+                showToast('保存失败: ' + e.message, 'error');
+            }
+        }
+
+        async function deleteAnniversary(id) {
+            if (!confirm('确定删除这个纪念日？')) return;
+            try {
+                const resp = await fetch(`${API_BASE}/anniversaries/${id}`, { method: 'DELETE' });
+                const data = await resp.json();
+                if (data.status === 'success') {
+                    showToast('✓ 已删除', 'success');
+                    await loadAnniversaries();
+                } else {
+                    showToast(data.detail || '删除失败', 'error');
+                }
+            } catch (e) {
+                showToast('删除失败: ' + e.message, 'error');
+            }
+        }
+
+        // ==================== PWA Service Worker 注册 ====================
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/static/sw.js').catch(() => {
+                    // SW 注册失败不影响页面功能
+                });
+            });
         }
     </script>
 </body>

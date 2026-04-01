@@ -421,6 +421,110 @@ class LongTermMemoryManager:
             f"- 触发依据: {evidence}\n"
         )
 
+    # ──────────────────────────────────────────────────────────────────────
+    # 主动记忆管理（Active Memory Management）
+    # ──────────────────────────────────────────────────────────────────────
+
+    def decay_trivial_memories(self, age_days: int = 30, min_ref_count: int = 0, decay_amount: float = 0.08) -> int:
+        """
+        对"冷门"记忆降低重要性分值，模拟遗忘曲线。
+        - age_days: 记忆创建超过此天数才考虑衰减
+        - min_ref_count: 引用次数 <= 此值才考虑衰减
+        - decay_amount: 每次调用降低的分值
+
+        返回衰减条数。
+        """
+        conn = db.get_connection()
+        cursor = conn.cursor()
+        cutoff_ts = (datetime.now() - __import__("datetime").timedelta(days=age_days)).isoformat()
+        cursor.execute(
+            """
+            SELECT id, importance_score FROM long_term_memories
+            WHERE created_at < ? AND reference_count <= ? AND importance_score > 0.1
+            """,
+            (cutoff_ts, min_ref_count),
+        )
+        rows = cursor.fetchall()
+        decayed = 0
+        for row in rows:
+            mem_id = row["id"]
+            new_score = max(0.1, round(float(row["importance_score"]) - decay_amount, 4))
+            cursor.execute(
+                "UPDATE long_term_memories SET importance_score = ? WHERE id = ?",
+                (new_score, mem_id),
+            )
+            decayed += 1
+        conn.commit()
+        conn.close()
+        logger.info(f"[记忆衰减] 已对 {decayed} 条冷门记忆降低重要性分值")
+        return decayed
+
+    def boost_emotional_memories(self, user_text: str, ai_text: str, boost_amount: float = 0.05) -> None:
+        """
+        当对话中检测到强情绪信号时，对最近关系类/经历类记忆提升重要性分值。
+        """
+        EMOTION_SIGNALS = [
+            "爱你", "喜欢你", "想念", "想你", "好开心", "太感动", "哭了",
+            "委屈", "幸福", "难受", "崩溃", "感谢", "谢谢你", "永远"
+        ]
+        combined = (user_text or "") + (ai_text or "")
+        if not any(sig in combined for sig in EMOTION_SIGNALS):
+            return
+        conn = db.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            UPDATE long_term_memories
+            SET importance_score = MIN(1.0, importance_score + ?)
+            WHERE category IN ('relationship', 'experience') AND importance_score < 1.0
+            ORDER BY last_updated DESC
+            LIMIT 5
+            """,
+            (boost_amount,),
+        )
+        conn.commit()
+        conn.close()
+
+    def compress_old_memories(self, category: str = None, max_per_key_prefix: int = 2) -> int:
+        """
+        合并同一 key 前缀下的冗余记忆，保留重要性最高的若干条，删除其余。
+        这是对 Mem0 "主动记忆管理" 理念的轻量实现。
+
+        返回删除条数。
+        """
+        categories = [category] if category else ["personality", "relationship", "experience", "preference", "important_info"]
+        total_removed = 0
+
+        conn = db.get_connection()
+        cursor = conn.cursor()
+
+        for cat in categories:
+            cursor.execute(
+                "SELECT id, key, importance_score FROM long_term_memories WHERE category = ? ORDER BY key, importance_score DESC",
+                (cat,),
+            )
+            rows = cursor.fetchall()
+            # Group by 4-char key prefix to catch near-duplicates like "pref_like_" variants
+            from collections import defaultdict
+            groups: dict = defaultdict(list)
+            for row in rows:
+                prefix = str(row["key"])[:20]
+                groups[prefix].append(row)
+
+            for prefix, group in groups.items():
+                if len(group) <= max_per_key_prefix:
+                    continue
+                # Keep top max_per_key_prefix by importance_score (already sorted DESC)
+                to_delete = group[max_per_key_prefix:]
+                ids_to_delete = [r["id"] for r in to_delete]
+                cursor.executemany("DELETE FROM long_term_memories WHERE id = ?", [(i,) for i in ids_to_delete])
+                total_removed += len(ids_to_delete)
+
+        conn.commit()
+        conn.close()
+        logger.info(f"[记忆压缩] 已删除 {total_removed} 条冗余记忆")
+        return total_removed
+
 
 class MemoryAugmentedPrompt:
     """

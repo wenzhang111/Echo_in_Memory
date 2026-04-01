@@ -30,6 +30,8 @@ from style_learner import StyleLearner
 from topic_initiator import topic_initiator, get_time_context
 from intent_classifier import intent_classifier
 from daily_briefing import daily_briefing_manager
+from emotion_engine import emotion_engine
+from anniversary_manager import anniversary_manager
 
 
 logging.basicConfig(
@@ -100,6 +102,32 @@ class DailyTodoItem(BaseModel):
 
 class DailyTodosUpdateRequest(BaseModel):
     todos: List[DailyTodoItem]
+
+
+class EmotionUpdateRequest(BaseModel):
+    happy: Optional[float] = None
+    anxious: Optional[float] = None
+    missing: Optional[float] = None
+    tired: Optional[float] = None
+    excited: Optional[float] = None
+
+
+class AnniversaryCreateRequest(BaseModel):
+    title: str
+    month: int
+    day: int
+    recurring: bool = True
+    year: Optional[int] = None
+    description: str = ""
+
+
+class AnniversaryUpdateRequest(BaseModel):
+    title: Optional[str] = None
+    month: Optional[int] = None
+    day: Optional[int] = None
+    recurring: Optional[bool] = None
+    year: Optional[int] = None
+    description: Optional[str] = None
 
 
 @app.on_event("startup")
@@ -180,6 +208,9 @@ async def chat(request: ChatRequest):
             "ai_response": response,
             "timestamp": datetime.now().isoformat(),
             "message_count": db.get_conversation_count(),
+            "emotion": emotion_engine.update_from_text(
+                character_manager.get_active_id(), request.message, response
+            ).badge_data(),
         }
     except HTTPException:
         raise
@@ -260,6 +291,8 @@ async def chat_with_api(request: ChatAPIRequest):
             character_id=active_id,
         )
         character_manager.add_chat_message(active_id, request.message, response)
+        emotion_state = emotion_engine.update_from_text(active_id, request.message, response)
+        memory_manager.boost_emotional_memories(request.message, response)
 
         return {
             "status": "success",
@@ -268,6 +301,7 @@ async def chat_with_api(request: ChatAPIRequest):
             "model_used": request.model,
             "timestamp": datetime.now().isoformat(),
             "message_count": db.get_conversation_count(),
+            "emotion": emotion_state.badge_data(),
         }
     except HTTPException:
         raise
@@ -310,13 +344,20 @@ async def chat_api_stream(request: ChatAPIRequest):
                 character_id=active_id,
             )
             character_manager.add_chat_message(active_id, request.message, response)
+            emotion_state = emotion_engine.update_from_text(active_id, request.message, response)
+            memory_manager.boost_emotional_memories(request.message, response)
 
             for char in response:
                 payload = json.dumps({"type": "chunk", "content": char}, ensure_ascii=False)
                 yield f"data: {payload}\n\n"
 
             done = json.dumps(
-                {"type": "done", "full_response": response, "message_count": db.get_conversation_count()},
+                {
+                    "type": "done",
+                    "full_response": response,
+                    "message_count": db.get_conversation_count(),
+                    "emotion": emotion_state.badge_data(),
+                },
                 ensure_ascii=False,
             )
             yield f"data: {done}\n\n"
@@ -937,6 +978,104 @@ async def suggest_topic(character_id: str = None, use_llm: bool = False):
 @app.get("/topic/time-context")
 async def get_current_time_context():
     return get_time_context()
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# 情感状态 API
+# ──────────────────────────────────────────────────────────────────────────
+
+@app.get("/emotion/state")
+async def get_emotion_state(character_id: str = None):
+    """获取当前角色的情绪状态"""
+    cid = character_id or character_manager.get_active_id()
+    state = emotion_engine.load(cid)
+    return {"status": "success", "character_id": cid, "emotion": state.badge_data(), "raw": state.to_dict()}
+
+
+@app.post("/emotion/update")
+async def update_emotion_state(data: EmotionUpdateRequest, character_id: str = None):
+    """手动调整情绪值（各维度 0-1）"""
+    cid = character_id or character_manager.get_active_id()
+    updates = {k: v for k, v in data.model_dump().items() if v is not None}
+    if not updates:
+        raise HTTPException(status_code=400, detail="至少提供一个情绪维度值")
+    state = emotion_engine.set_state(cid, updates)
+    return {"status": "success", "character_id": cid, "emotion": state.badge_data()}
+
+
+@app.post("/emotion/reset")
+async def reset_emotion_state(character_id: str = None):
+    """重置情绪为默认值"""
+    cid = character_id or character_manager.get_active_id()
+    state = emotion_engine.reset(cid)
+    return {"status": "success", "character_id": cid, "emotion": state.badge_data()}
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# 主动记忆管理 API
+# ──────────────────────────────────────────────────────────────────────────
+
+@app.post("/memory/compact")
+async def compact_memories(category: str = None):
+    """压缩冗余记忆（合并相同前缀的重复条目）"""
+    removed = memory_manager.compress_old_memories(category=category)
+    return {"status": "success", "removed_count": removed, "category": category or "全部"}
+
+
+@app.post("/memory/decay")
+async def decay_memories(age_days: int = 30):
+    """对冷门旧记忆执行重要性衰减"""
+    decayed = memory_manager.decay_trivial_memories(age_days=age_days)
+    return {"status": "success", "decayed_count": decayed, "age_days": age_days}
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# 纪念日 API
+# ──────────────────────────────────────────────────────────────────────────
+
+@app.get("/anniversaries")
+async def list_anniversaries(include_builtin: bool = True):
+    """列出所有纪念日（含内置节日）"""
+    items = anniversary_manager.list_anniversaries(include_builtin=include_builtin)
+    return {"status": "success", "count": len(items), "anniversaries": items}
+
+
+@app.get("/anniversaries/upcoming")
+async def get_upcoming_anniversaries(within_days: int = 7):
+    """获取未来 N 天内的纪念日"""
+    items = anniversary_manager.get_upcoming(within_days=within_days)
+    return {"status": "success", "within_days": within_days, "count": len(items), "anniversaries": items}
+
+
+@app.post("/anniversaries")
+async def create_anniversary(data: AnniversaryCreateRequest):
+    """创建新纪念日"""
+    try:
+        ann = anniversary_manager.create_anniversary(data.model_dump())
+        return {"status": "success", "anniversary": ann.to_dict()}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.put("/anniversaries/{ann_id}")
+async def update_anniversary_item(ann_id: str, data: AnniversaryUpdateRequest):
+    """更新纪念日"""
+    updates = {k: v for k, v in data.model_dump().items() if v is not None}
+    try:
+        ann = anniversary_manager.update_anniversary(ann_id, updates)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    if not ann:
+        raise HTTPException(status_code=404, detail="纪念日不存在")
+    return {"status": "success", "anniversary": ann.to_dict()}
+
+
+@app.delete("/anniversaries/{ann_id}")
+async def delete_anniversary_item(ann_id: str):
+    """删除纪念日"""
+    if not anniversary_manager.delete_anniversary(ann_id):
+        raise HTTPException(status_code=404, detail="纪念日不存在")
+    return {"status": "success", "deleted_id": ann_id}
 
 
 @app.exception_handler(HTTPException)

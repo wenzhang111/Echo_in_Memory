@@ -174,6 +174,15 @@ class Character:
         except Exception:
             pass
 
+        # 情绪状态提示
+        emotion_hint = ""
+        try:
+            from emotion_engine import emotion_engine
+            state = emotion_engine.load(self.id)
+            emotion_hint = state.to_prompt_hint()
+        except Exception:
+            pass
+
         prompt = f"""{self.system_prompt}
 
 ## 基本设定
@@ -187,7 +196,7 @@ class Character:
 {style_prompt}
 {learned_style}
 {time_ctx_str}
-
+{emotion_hint}
 ## 对话原则
 1. **真诚对待**: 真实回应用户的情感和需求
 2. **记住细节**: 参考下面的记忆信息，体现你了解对方
