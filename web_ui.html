@@ -602,6 +602,45 @@
             padding: 2px 10px;
             border-radius: 10px;
         }
+
+        /* Desktop pet */
+        .desktop-pet {
+            position: fixed;
+            right: 24px;
+            bottom: 20px;
+            z-index: 999;
+            user-select: none;
+            cursor: grab;
+        }
+        .desktop-pet.dragging { cursor: grabbing; }
+        .desktop-pet .pet-body {
+            width: 66px;
+            height: 66px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #667eea 0%, #f093fb 100%);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 32px;
+            box-shadow: 0 8px 20px rgba(102,126,234,0.35);
+        }
+        .desktop-pet .pet-bubble {
+            margin-top: 8px;
+            max-width: 220px;
+            background: white;
+            border-radius: 12px;
+            padding: 8px 10px;
+            font-size: 12px;
+            color: #444;
+            box-shadow: 0 6px 18px rgba(0,0,0,0.15);
+        }
+        .assistant-card {
+            background: linear-gradient(135deg, #eef2ff 0%, #f5f3ff 100%);
+            border: 1px solid #dbeafe;
+            border-radius: 12px;
+            padding: 14px;
+        }
     </style>
 </head>
 <body>
@@ -698,6 +737,19 @@
                     <div class="p-4 border rounded-xl bg-amber-50 border-amber-200 text-sm text-gray-700">
                         <p class="font-bold mb-2">使用建议</p>
                         <p>先导入记录 → 在角色页提取风格 → 再进入对话；设置页可按角色做数据导出与清理。</p>
+                    </div>
+
+                    <div class="assistant-card mt-4">
+                        <div class="flex items-center justify-between mb-2">
+                            <h4 class="font-bold">🛠️ 功能助手（模块化技能）</h4>
+                            <button class="btn-secondary text-xs px-3 py-1" onclick="loadAssistantSkills()">刷新技能</button>
+                        </div>
+                        <div id="assistantSkillList" class="text-sm text-gray-700 mb-3">加载中...</div>
+                        <div class="flex gap-2">
+                            <input id="assistantUserInput" class="input-field flex-1" placeholder="输入一句话，让助手推荐可用技能">
+                            <button class="btn-primary text-xs px-4" onclick="assistantSuggest()">推荐技能</button>
+                        </div>
+                        <div id="assistantSuggestResult" class="text-xs text-gray-600 mt-2"></div>
                     </div>
                 </div>
 
@@ -1183,6 +1235,11 @@
             </div>
         </div>
     </div>
+
+    <div id="desktopPet" class="desktop-pet" title="可拖拽桌宠，双击可打招呼">
+        <div class="pet-body">🐾</div>
+        <div id="petBubble" class="pet-bubble">嗨～我是你的桌宠助手，点我或双击试试。</div>
+    </div>
     
     <script>
         const API_BASE = 'http://localhost:8000';
@@ -1233,6 +1290,10 @@
             refreshDataScopeSummary();
             // 加载情绪状态
             loadEmotionState();
+            // 功能助手列表
+            loadAssistantSkills();
+            // 初始化桌宠
+            initDesktopPet();
             // 检查服务状态
             checkServiceStatus();
             // 每10秒检查一次服务状态
@@ -2955,6 +3016,119 @@
             } catch (e) {
                 showToast('删除失败: ' + e.message, 'error');
             }
+        }
+
+        // ==================== 功能助手 ====================
+        async function loadAssistantSkills() {
+            const box = document.getElementById('assistantSkillList');
+            if (!box) return;
+            try {
+                const resp = await fetch(`${API_BASE}/assistant/skills`);
+                const data = await resp.json();
+                const skills = data.skills || [];
+                if (!skills.length) {
+                    box.textContent = '暂无技能';
+                    return;
+                }
+                box.innerHTML = skills.map(s => `
+                    <div class="mb-1">
+                        <span class="font-semibold text-indigo-700">${s.title}</span>
+                        <span class="text-gray-500">(${s.name})</span>：${s.description}
+                    </div>
+                `).join('');
+            } catch (e) {
+                box.textContent = '技能加载失败';
+            }
+        }
+
+        async function assistantSuggest() {
+            const input = document.getElementById('assistantUserInput');
+            const result = document.getElementById('assistantSuggestResult');
+            const msg = (input?.value || '').trim();
+            if (!msg) {
+                showToast('请先输入内容', 'error');
+                return;
+            }
+            try {
+                const resp = await fetch(`${API_BASE}/assistant/suggest`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message: msg }),
+                });
+                const data = await resp.json();
+                const sug = data.suggestion || {};
+                const intent = sug.intent?.intent || 'unknown';
+                const skills = (sug.recommended_skills || []).join('、');
+                result.textContent = `识别意图: ${intent}；推荐技能: ${skills || '无'}`;
+            } catch (e) {
+                result.textContent = '推荐失败';
+            }
+        }
+
+        // ==================== 简单桌宠 ====================
+        function initDesktopPet() {
+            const pet = document.getElementById('desktopPet');
+            const bubble = document.getElementById('petBubble');
+            if (!pet || !bubble) return;
+
+            const lines = [
+                '记得喝水呀～',
+                '要不要先做最重要的一件事？',
+                '我可以帮你想话题开场。',
+                '累了就休息一下，我在。',
+                '今天也一起稳稳推进吧。'
+            ];
+
+            let drag = { down: false, startX: 0, startY: 0, left: 0, top: 0 };
+
+            const setBubble = (text) => { bubble.textContent = text; };
+
+            pet.addEventListener('click', () => {
+                setBubble(lines[Math.floor(Math.random() * lines.length)]);
+            });
+
+            pet.addEventListener('dblclick', async () => {
+                try {
+                    const cid = activeCharacterId || 'default';
+                    const resp = await fetch(`${API_BASE}/assistant/execute`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ skill: 'topic_suggestion', character_id: cid, params: {} }),
+                    });
+                    const data = await resp.json();
+                    const topic = data?.result?.topic || '';
+                    if (topic) setBubble(`💡 ${topic}`);
+                } catch (e) {
+                    setBubble('我刚刚走神啦，稍后再试。');
+                }
+            });
+
+            pet.addEventListener('mousedown', (e) => {
+                drag.down = true;
+                pet.classList.add('dragging');
+                const rect = pet.getBoundingClientRect();
+                drag.startX = e.clientX;
+                drag.startY = e.clientY;
+                drag.left = rect.left;
+                drag.top = rect.top;
+                pet.style.right = 'auto';
+                pet.style.bottom = 'auto';
+                pet.style.left = `${rect.left}px`;
+                pet.style.top = `${rect.top}px`;
+            });
+
+            window.addEventListener('mousemove', (e) => {
+                if (!drag.down) return;
+                const dx = e.clientX - drag.startX;
+                const dy = e.clientY - drag.startY;
+                pet.style.left = `${Math.max(0, drag.left + dx)}px`;
+                pet.style.top = `${Math.max(0, drag.top + dy)}px`;
+            });
+
+            window.addEventListener('mouseup', () => {
+                drag.down = false;
+                pet.classList.remove('dragging');
+            });
         }
 
         // ==================== PWA Service Worker 注册 ====================

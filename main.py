@@ -32,6 +32,7 @@ from intent_classifier import intent_classifier
 from daily_briefing import daily_briefing_manager
 from emotion_engine import emotion_engine
 from anniversary_manager import anniversary_manager
+from assistant_skills import FunctionalAssistantHub
 
 
 logging.basicConfig(
@@ -139,6 +140,27 @@ class AnniversaryUpdateRequest(BaseModel):
     recurring: Optional[bool] = None
     year: Optional[int] = None
     description: Optional[str] = None
+
+
+class AssistantExecuteRequest(BaseModel):
+    skill: str
+    character_id: Optional[str] = None
+    params: dict = Field(default_factory=dict)
+
+
+class AssistantSuggestRequest(BaseModel):
+    message: str
+
+
+assistant_hub = FunctionalAssistantHub(
+    character_manager=character_manager,
+    topic_initiator=topic_initiator,
+    daily_briefing_manager=daily_briefing_manager,
+    intent_classifier=intent_classifier,
+    emotion_engine=emotion_engine,
+    anniversary_manager=anniversary_manager,
+    memory_manager=memory_manager,
+)
 
 
 @app.on_event("startup")
@@ -592,6 +614,30 @@ async def correct_memory_item_priority(data: MemoryCorrectionRequest):
 async def detect_intent(data: IntentDetectRequest):
     result = intent_classifier.detect(data.message)
     return {"status": "success", "result": result.to_dict()}
+
+
+@app.get("/assistant/skills")
+async def get_assistant_skills():
+    return {"status": "success", "skills": assistant_hub.list_skills()}
+
+
+@app.post("/assistant/execute")
+async def execute_assistant_skill(data: AssistantExecuteRequest):
+    result = assistant_hub.execute(
+        skill_name=(data.skill or "").strip(),
+        character_id=data.character_id,
+        params=data.params or {},
+    )
+    if result.get("status") != "success":
+        raise HTTPException(status_code=404, detail=result.get("detail", "技能执行失败"))
+    return result
+
+
+@app.post("/assistant/suggest")
+async def suggest_assistant_skills(data: AssistantSuggestRequest):
+    if not (data.message or "").strip():
+        raise HTTPException(status_code=400, detail="message 不能为空")
+    return {"status": "success", "suggestion": assistant_hub.suggest(data.message)}
 
 
 @app.get("/daily/todos")
