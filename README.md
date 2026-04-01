@@ -135,6 +135,10 @@ python run_server.py
 
 - `GET /memory/context`
 - `GET /memory/search`
+- `GET /memory/all?emotion_priority=true`（情感优先重排）
+- `POST /memory/correct-priority`（高优先纠错通道）
+- `POST /memory/compact`
+- `POST /memory/decay`
 - `GET /history`
 - `GET /history/related`
 - `GET /stats`
@@ -144,8 +148,13 @@ python run_server.py
 
 - `POST /style/learn`
 - `GET /style/profile`
+- `PUT /style/control`（风格强度档位 + 负向约束）
 - `GET /topic/suggest`
 - `POST /topic/proactive/trigger`
+
+### 评估
+
+- `GET /metrics/summary`（记忆命中率/误召回率/纠错率 + 风格相似度/一致性/满意度代理）
 
 ### 管理
 

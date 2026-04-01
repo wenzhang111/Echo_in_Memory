@@ -3,6 +3,7 @@
 """
 import logging
 import re
+from collections import defaultdict
 from typing import List, Dict, Optional, Set, Tuple
 from datetime import datetime, timedelta
 import json
@@ -566,8 +567,7 @@ class LongTermMemoryManager:
                 (cat,),
             )
             rows = cursor.fetchall()
-            # Group by 4-char key prefix to catch near-duplicates like "pref_like_" variants
-            from collections import defaultdict
+            # Group by key prefix to catch near-duplicates like "pref_like_" variants
             groups: dict = defaultdict(list)
             for row in rows:
                 prefix = str(row["key"])[:20]
