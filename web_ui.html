@@ -625,6 +625,14 @@
             font-size: 32px;
             box-shadow: 0 8px 20px rgba(102,126,234,0.35);
         }
+        .pet-body.state-idle { animation: petIdle 2.4s ease-in-out infinite; }
+        .pet-body.state-walking { animation: petWalk 0.8s ease-in-out infinite; }
+        .pet-body.state-thinking { animation: petThink 1.2s ease-in-out infinite; }
+        .pet-body.state-sleeping { animation: petSleep 2s ease-in-out infinite; }
+        @keyframes petIdle { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-3px)} }
+        @keyframes petWalk { 0%,100%{transform:translateX(0)} 50%{transform:translateX(3px)} }
+        @keyframes petThink { 0%,100%{transform:rotate(0deg)} 50%{transform:rotate(8deg)} }
+        @keyframes petSleep { 0%,100%{transform:scale(1)} 50%{transform:scale(0.95)} }
         .desktop-pet .pet-bubble {
             margin-top: 8px;
             max-width: 220px;
@@ -635,6 +643,28 @@
             color: #444;
             box-shadow: 0 6px 18px rgba(0,0,0,0.15);
         }
+        .pet-menu {
+            margin-top: 6px;
+            background: rgba(255,255,255,0.98);
+            border-radius: 10px;
+            padding: 6px;
+            display: none;
+            box-shadow: 0 8px 20px rgba(0,0,0,0.15);
+            width: 220px;
+        }
+        .pet-menu.show { display: block; }
+        .pet-menu button {
+            width: 100%;
+            text-align: left;
+            border: none;
+            background: transparent;
+            padding: 6px 8px;
+            border-radius: 8px;
+            font-size: 12px;
+            color: #374151;
+            cursor: pointer;
+        }
+        .pet-menu button:hover { background: #eef2ff; }
         .assistant-card {
             background: linear-gradient(135deg, #eef2ff 0%, #f5f3ff 100%);
             border: 1px solid #dbeafe;
@@ -1237,8 +1267,17 @@
     </div>
 
     <div id="desktopPet" class="desktop-pet" title="可拖拽桌宠，双击可打招呼">
-        <div class="pet-body">🐾</div>
+        <div id="petBody" class="pet-body state-idle">🐾</div>
         <div id="petBubble" class="pet-bubble">嗨～我是你的桌宠助手，点我或双击试试。</div>
+        <div id="petMenu" class="pet-menu">
+            <button onclick="petQuickAction('topic')">💡 生成开场话题</button>
+            <button onclick="petQuickAction('briefing')">📝 今日通报</button>
+            <button onclick="petQuickAction('chat')">💬 打开聊天页</button>
+            <button onclick="petQuickAction('toggleRoam')">🚶 开关自动巡游</button>
+            <button onclick="petQuickAction('toggleBubble')">💭 开关气泡</button>
+            <button onclick="petQuickAction('scaleUp')">➕ 放大桌宠</button>
+            <button onclick="petQuickAction('scaleDown')">➖ 缩小桌宠</button>
+        </div>
     </div>
     
     <script>
@@ -3065,11 +3104,73 @@
             }
         }
 
-        // ==================== 简单桌宠 ====================
+        // ==================== 桌宠增强版 ====================
+        let petRuntime = null;
+
+        function petQuickAction(action) {
+            if (!petRuntime) return;
+            const { pet, bubble, menu, setBubble, saveSettings, config } = petRuntime;
+            if (action === 'chat') {
+                goTab('chat');
+                menu.classList.remove('show');
+                return;
+            }
+            if (action === 'toggleRoam') {
+                config.autoRoam = !config.autoRoam;
+                setBubble(config.autoRoam ? '已开启自动巡游～' : '已关闭自动巡游。');
+                saveSettings();
+                return;
+            }
+            if (action === 'toggleBubble') {
+                config.showBubble = !config.showBubble;
+                bubble.style.display = config.showBubble ? 'block' : 'none';
+                saveSettings();
+                return;
+            }
+            if (action === 'scaleUp' || action === 'scaleDown') {
+                const delta = action === 'scaleUp' ? 0.1 : -0.1;
+                config.scale = Math.max(0.8, Math.min(1.8, (config.scale || 1) + delta));
+                pet.style.transform = `scale(${config.scale})`;
+                saveSettings();
+                return;
+            }
+            if (action === 'topic') {
+                petRunSkill('topic_suggestion', (data) => {
+                    const topic = data?.result?.topic || '';
+                    if (topic) setBubble(`💡 ${topic}`);
+                });
+                return;
+            }
+            if (action === 'briefing') {
+                petRunSkill('daily_briefing', (data) => {
+                    const text = data?.result?.message || '';
+                    if (text) setBubble(text.slice(0, 40) + (text.length > 40 ? '…' : ''));
+                });
+                return;
+            }
+        }
+
+        async function petRunSkill(skill, onOk) {
+            try {
+                const cid = activeCharacterId || 'default';
+                const resp = await fetch(`${API_BASE}/assistant/execute`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ skill, character_id: cid, params: {} }),
+                });
+                const data = await resp.json();
+                onOk?.(data);
+            } catch (e) {
+                petRuntime?.setBubble('网络开小差了，稍后再试～');
+            }
+        }
+
         function initDesktopPet() {
             const pet = document.getElementById('desktopPet');
             const bubble = document.getElementById('petBubble');
-            if (!pet || !bubble) return;
+            const body = document.getElementById('petBody');
+            const menu = document.getElementById('petMenu');
+            if (!pet || !bubble || !body || !menu) return;
 
             const lines = [
                 '记得喝水呀～',
@@ -3079,33 +3180,137 @@
                 '今天也一起稳稳推进吧。'
             ];
 
-            let drag = { down: false, startX: 0, startY: 0, left: 0, top: 0 };
+            const PET_STORAGE_KEY = 'desktop_pet_settings_v2';
+            const stateEmoji = {
+                idle: '🐾',
+                walking: '🚶',
+                thinking: '🤔',
+                sleeping: '😴'
+            };
+            const config = {
+                left: null,
+                top: null,
+                scale: 1,
+                autoRoam: true,
+                showBubble: true
+            };
+            try {
+                const raw = localStorage.getItem(PET_STORAGE_KEY);
+                if (raw) Object.assign(config, JSON.parse(raw));
+            } catch (e) {}
 
-            const setBubble = (text) => { bubble.textContent = text; };
+            let drag = { down: false, startX: 0, startY: 0, left: 0, top: 0 };
+            let currentState = 'idle';
+
+            const saveSettings = () => {
+                try {
+                    localStorage.setItem(PET_STORAGE_KEY, JSON.stringify(config));
+                } catch (e) {}
+            };
+
+            const clampToViewport = () => {
+                const rect = pet.getBoundingClientRect();
+                const maxX = Math.max(0, window.innerWidth - rect.width - 4);
+                const maxY = Math.max(0, window.innerHeight - rect.height - 4);
+                const nowX = Math.max(0, Math.min(maxX, rect.left));
+                const nowY = Math.max(0, Math.min(maxY, rect.top));
+                pet.style.left = `${nowX}px`;
+                pet.style.top = `${nowY}px`;
+                config.left = nowX;
+                config.top = nowY;
+                saveSettings();
+            };
+
+            const setState = (s) => {
+                currentState = s;
+                body.classList.remove('state-idle', 'state-walking', 'state-thinking', 'state-sleeping');
+                body.classList.add(`state-${s}`);
+                body.textContent = stateEmoji[s] || '🐾';
+            };
+
+            const setBubble = (text) => {
+                bubble.textContent = text;
+                if (!config.showBubble) return;
+                bubble.style.display = 'block';
+            };
+
+            const snapToEdge = () => {
+                const rect = pet.getBoundingClientRect();
+                const x = rect.left;
+                const y = rect.top;
+                const right = window.innerWidth - rect.right;
+                const bottom = window.innerHeight - rect.bottom;
+                const min = Math.min(x, y, right, bottom);
+                let tx = x;
+                let ty = y;
+                if (min === x) tx = 8;
+                else if (min === right) tx = Math.max(8, window.innerWidth - rect.width - 8);
+                else if (min === y) ty = 8;
+                else ty = Math.max(8, window.innerHeight - rect.height - 8);
+                pet.style.left = `${tx}px`;
+                pet.style.top = `${ty}px`;
+                config.left = tx;
+                config.top = ty;
+                saveSettings();
+            };
+
+            const autoRoam = () => {
+                if (!config.autoRoam || drag.down) return;
+                if (document.hidden) return;
+                setState('walking');
+                const rect = pet.getBoundingClientRect();
+                const maxX = Math.max(8, window.innerWidth - rect.width - 8);
+                const maxY = Math.max(8, window.innerHeight - rect.height - 8);
+                const tx = Math.floor(8 + Math.random() * (maxX - 8));
+                const ty = Math.floor(8 + Math.random() * (maxY - 8));
+                pet.style.transition = 'left 0.8s ease, top 0.8s ease';
+                pet.style.left = `${tx}px`;
+                pet.style.top = `${ty}px`;
+                window.setTimeout(() => {
+                    pet.style.transition = '';
+                    config.left = tx;
+                    config.top = ty;
+                    saveSettings();
+                    setState('idle');
+                }, 900);
+            };
+
+            pet.style.transform = `scale(${config.scale || 1})`;
+            bubble.style.display = config.showBubble ? 'block' : 'none';
+            if (Number.isFinite(config.left) && Number.isFinite(config.top)) {
+                pet.style.right = 'auto';
+                pet.style.bottom = 'auto';
+                pet.style.left = `${config.left}px`;
+                pet.style.top = `${config.top}px`;
+                clampToViewport();
+            }
 
             pet.addEventListener('click', () => {
+                menu.classList.remove('show');
+                setState('idle');
                 setBubble(lines[Math.floor(Math.random() * lines.length)]);
             });
 
             pet.addEventListener('dblclick', async () => {
-                try {
-                    const cid = activeCharacterId || 'default';
-                    const resp = await fetch(`${API_BASE}/assistant/execute`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ skill: 'topic_suggestion', character_id: cid, params: {} }),
-                    });
-                    const data = await resp.json();
+                setState('thinking');
+                await petRunSkill('topic_suggestion', (data) => {
                     const topic = data?.result?.topic || '';
                     if (topic) setBubble(`💡 ${topic}`);
-                } catch (e) {
-                    setBubble('我刚刚走神啦，稍后再试。');
-                }
+                });
+                setTimeout(() => setState('idle'), 500);
+            });
+
+            pet.addEventListener('contextmenu', (e) => {
+                e.preventDefault();
+                menu.classList.toggle('show');
             });
 
             pet.addEventListener('mousedown', (e) => {
+                if (e.button !== 0) return;
                 drag.down = true;
                 pet.classList.add('dragging');
+                setState('walking');
+                menu.classList.remove('show');
                 const rect = pet.getBoundingClientRect();
                 drag.startX = e.clientX;
                 drag.startY = e.clientY;
@@ -3121,14 +3326,38 @@
                 if (!drag.down) return;
                 const dx = e.clientX - drag.startX;
                 const dy = e.clientY - drag.startY;
-                pet.style.left = `${Math.max(0, drag.left + dx)}px`;
-                pet.style.top = `${Math.max(0, drag.top + dy)}px`;
+                const px = Math.max(0, drag.left + dx);
+                const py = Math.max(0, drag.top + dy);
+                pet.style.left = `${px}px`;
+                pet.style.top = `${py}px`;
             });
 
             window.addEventListener('mouseup', () => {
+                if (!drag.down) return;
                 drag.down = false;
                 pet.classList.remove('dragging');
+                snapToEdge();
+                setState('idle');
             });
+
+            window.addEventListener('resize', () => {
+                clampToViewport();
+            });
+
+            // 随机状态切换（参考常见桌宠“待机/思考/睡眠”）
+            setInterval(() => {
+                if (drag.down) return;
+                if (currentState === 'walking') return;
+                const r = Math.random();
+                if (r < 0.08) setState('sleeping');
+                else if (r < 0.2) setState('thinking');
+                else setState('idle');
+            }, 6000);
+
+            // 自动巡游（参考高 star 项目常见“wander”行为）
+            setInterval(autoRoam, 8000);
+
+            petRuntime = { pet, bubble, menu, config, setBubble, saveSettings };
         }
 
         // ==================== PWA Service Worker 注册 ====================
