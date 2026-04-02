@@ -135,6 +135,10 @@ python run_server.py
 
 - `GET /memory/context`
 - `GET /memory/search`
+- `GET /memory/all?emotion_priority=true`（情感优先重排）
+- `POST /memory/correct-priority`（高优先纠错通道）
+- `POST /memory/compact`
+- `POST /memory/decay`
 - `GET /history`
 - `GET /history/related`
 - `GET /stats`
@@ -144,8 +148,41 @@ python run_server.py
 
 - `POST /style/learn`
 - `GET /style/profile`
+- `PUT /style/control`（风格强度档位 + 负向约束）
 - `GET /topic/suggest`
 - `POST /topic/proactive/trigger`
+
+### 功能助手（模块化）
+
+- `GET /assistant/skills`（查看已注册技能）
+- `POST /assistant/execute`（统一执行技能）
+- `POST /assistant/suggest`（根据输入推荐技能）
+
+内置技能（可扩展）：
+- `topic_suggestion` 话题建议
+- `daily_briefing` 每日通报
+- `intent_detect` 意图识别
+- `emotion_snapshot` 情绪快照
+- `anniversary_upcoming` 纪念日提醒
+- `memory_snapshot` 记忆摘要
+
+扩展方式：在 `assistant_skills.py` 中新增 `AssistantSkill` 并注册到 `FunctionalAssistantHub`。
+
+### 评估
+
+- `GET /metrics/summary`（记忆命中率/误召回率/纠错率 + 风格相似度/一致性/满意度代理）
+
+## 6.1 桌宠（增强版）
+
+Web UI 内置一个轻量桌宠（右下角悬浮）：
+
+- 可拖拽
+- 吸边停靠（拖拽释放后自动贴边）
+- 自动巡游（可在桌宠菜单开关）
+- 状态机动画（待机/巡游/思考/睡眠）
+- 单击随机鼓励文案，双击快速调用助手技能生成话题建议
+- 右键菜单快捷动作（生成话题、今日通报、跳转聊天、缩放、开关气泡）
+- 本地持久化桌宠设置（位置/缩放/开关）
 
 ### 管理
 

@@ -4,6 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>言忆 - AI角色记忆系统</title>
+    <!-- PWA meta -->
+    <meta name="theme-color" content="#667eea">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="言忆">
+    <link rel="manifest" href="/static/manifest.json">
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
@@ -403,6 +410,55 @@
         @keyframes blink {
             50% { opacity: 0; }
         }
+
+        /* Emotion badge */
+        .emotion-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 2px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+            background: rgba(255,255,255,0.25);
+            color: white;
+            border: 1px solid rgba(255,255,255,0.4);
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .emotion-badge:hover { background: rgba(255,255,255,0.35); }
+
+        /* Voice buttons */
+        .btn-voice {
+            background: linear-gradient(135deg, #43e97b, #38f9d7);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            padding: 8px 12px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: opacity 0.2s;
+            flex-shrink: 0;
+        }
+        .btn-voice:hover { opacity: 0.85; }
+        .btn-voice.recording {
+            background: linear-gradient(135deg, #f5576c, #f093fb);
+            animation: voicePulse 1s infinite;
+        }
+        @keyframes voicePulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.08); }
+        }
+        .btn-speak {
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-size: 13px;
+            color: #aaa;
+            padding: 2px 4px;
+            margin-left: 4px;
+        }
+        .btn-speak:hover { color: #667eea; }
         
         @media (max-width: 768px) {
             .message-wrapper {
@@ -546,6 +602,75 @@
             padding: 2px 10px;
             border-radius: 10px;
         }
+
+        /* Desktop pet */
+        .desktop-pet {
+            position: fixed;
+            right: 24px;
+            bottom: 20px;
+            z-index: 999;
+            user-select: none;
+            cursor: grab;
+        }
+        .desktop-pet.dragging { cursor: grabbing; }
+        .desktop-pet .pet-body {
+            width: 66px;
+            height: 66px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #667eea 0%, #f093fb 100%);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 32px;
+            box-shadow: 0 8px 20px rgba(102,126,234,0.35);
+        }
+        .pet-body.state-idle { animation: petIdle 2.4s ease-in-out infinite; }
+        .pet-body.state-walking { animation: petWalk 0.8s ease-in-out infinite; }
+        .pet-body.state-thinking { animation: petThink 1.2s ease-in-out infinite; }
+        .pet-body.state-sleeping { animation: petSleep 2s ease-in-out infinite; }
+        @keyframes petIdle { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-3px)} }
+        @keyframes petWalk { 0%,100%{transform:translateX(0)} 50%{transform:translateX(3px)} }
+        @keyframes petThink { 0%,100%{transform:rotate(0deg)} 50%{transform:rotate(8deg)} }
+        @keyframes petSleep { 0%,100%{transform:scale(1)} 50%{transform:scale(0.95)} }
+        .desktop-pet .pet-bubble {
+            margin-top: 8px;
+            max-width: 220px;
+            background: white;
+            border-radius: 12px;
+            padding: 8px 10px;
+            font-size: 12px;
+            color: #444;
+            box-shadow: 0 6px 18px rgba(0,0,0,0.15);
+        }
+        .pet-menu {
+            margin-top: 6px;
+            background: rgba(255,255,255,0.98);
+            border-radius: 10px;
+            padding: 6px;
+            display: none;
+            box-shadow: 0 8px 20px rgba(0,0,0,0.15);
+            width: 220px;
+        }
+        .pet-menu.show { display: block; }
+        .pet-menu button {
+            width: 100%;
+            text-align: left;
+            border: none;
+            background: transparent;
+            padding: 6px 8px;
+            border-radius: 8px;
+            font-size: 12px;
+            color: #374151;
+            cursor: pointer;
+        }
+        .pet-menu button:hover { background: #eef2ff; }
+        .assistant-card {
+            background: linear-gradient(135deg, #eef2ff 0%, #f5f3ff 100%);
+            border: 1px solid #dbeafe;
+            border-radius: 12px;
+            padding: 14px;
+        }
     </style>
 </head>
 <body>
@@ -557,6 +682,10 @@
             <!-- 角色切换栏 -->
             <div id="characterBar" class="mt-4 flex items-center justify-center gap-2 flex-wrap">
                 <!-- 角色卡片由 JS 动态渲染 -->
+            </div>
+            <!-- 情绪状态 badge -->
+            <div class="mt-2 flex items-center justify-center gap-3">
+                <span id="emotionBadge" class="emotion-badge" onclick="goTab('chat')" title="当前角色情绪状态，点击进入对话">😊 开心</span>
             </div>
             <div class="mt-3 flex items-center justify-center gap-4">
                 <p class="text-white text-sm opacity-75">当前模型: <span id="modelStatus" class="font-bold">加载中...</span></p>
@@ -589,6 +718,7 @@
                 <button class="tab-button" onclick="switchTab('import', this)">📥 导入</button>
                 <button class="tab-button" onclick="switchTab('memory', this)">🧠 记忆</button>
                 <button class="tab-button" onclick="switchTab('personality', this)">🧩 角色</button>
+                <button class="tab-button" onclick="switchTab('anniversaries', this)">🎂 纪念日</button>
                 <button class="tab-button" onclick="switchTab('stats', this)">📊 统计</button>
                 <button class="tab-button" onclick="switchTab('settings', this)">⚙️ 设置</button>
             </div>
@@ -638,6 +768,19 @@
                         <p class="font-bold mb-2">使用建议</p>
                         <p>先导入记录 → 在角色页提取风格 → 再进入对话；设置页可按角色做数据导出与清理。</p>
                     </div>
+
+                    <div class="assistant-card mt-4">
+                        <div class="flex items-center justify-between mb-2">
+                            <h4 class="font-bold">🛠️ 功能助手（模块化技能）</h4>
+                            <button class="btn-secondary text-xs px-3 py-1" onclick="loadAssistantSkills()">刷新技能</button>
+                        </div>
+                        <div id="assistantSkillList" class="text-sm text-gray-700 mb-3">加载中...</div>
+                        <div class="flex gap-2">
+                            <input id="assistantUserInput" class="input-field flex-1" placeholder="输入一句话，让助手推荐可用技能">
+                            <button class="btn-primary text-xs px-4" onclick="assistantSuggest()">推荐技能</button>
+                        </div>
+                        <div id="assistantSuggestResult" class="text-xs text-gray-600 mt-2"></div>
+                    </div>
                 </div>
 
                 <!-- 聊天标签页 -->
@@ -682,6 +825,7 @@
                                 placeholder="输入你的消息..."
                                 onkeypress="handleKeyPress(event)"
                             >
+                            <button id="voiceBtn" class="btn-voice" onclick="toggleVoiceInput()" title="语音输入（点击开始/停止）">🎤</button>
                             <button class="btn-primary px-8" onclick="sendMessage()">发送</button>
                         </div>
                         
@@ -1065,7 +1209,74 @@
                         <button class="btn-primary w-full" onclick="saveAllSettings()">💾 保存所有设置</button>
                     </div>
                 </div>
+
+                <!-- 纪念日标签页 -->
+                <div id="anniversaries" class="tab-content">
+                    <h3 class="text-2xl font-bold mb-2">🎂 纪念日与节日提醒</h3>
+                    <p class="text-sm text-gray-600 mb-4">管理你的纪念日，系统会在每日通报中自动提醒即将到来的日期。</p>
+
+                    <!-- 即将到来 -->
+                    <div id="upcomingAnniversaries" class="mb-6 p-4 bg-pink-50 border border-pink-200 rounded-xl hidden">
+                        <h4 class="font-bold text-pink-700 mb-2">⏰ 近期即将到来</h4>
+                        <div id="upcomingList"></div>
+                    </div>
+
+                    <!-- 添加新纪念日 -->
+                    <div class="bg-white border rounded-xl p-5 mb-5">
+                        <h4 class="font-bold mb-3">➕ 添加新纪念日</h4>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-sm font-semibold mb-1">名称 *</label>
+                                <input id="annTitle" type="text" class="input-field" placeholder="例：恋爱纪念日">
+                            </div>
+                            <div class="flex gap-2">
+                                <div class="flex-1">
+                                    <label class="block text-sm font-semibold mb-1">月份 *</label>
+                                    <input id="annMonth" type="number" class="input-field" min="1" max="12" placeholder="月">
+                                </div>
+                                <div class="flex-1">
+                                    <label class="block text-sm font-semibold mb-1">日期 *</label>
+                                    <input id="annDay" type="number" class="input-field" min="1" max="31" placeholder="日">
+                                </div>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-semibold mb-1">备注（可选）</label>
+                                <input id="annDesc" type="text" class="input-field" placeholder="简短描述">
+                            </div>
+                            <div>
+                                <label class="flex items-center gap-2 mt-5 cursor-pointer">
+                                    <input id="annRecurring" type="checkbox" checked>
+                                    <span class="text-sm font-semibold">每年重复</span>
+                                </label>
+                            </div>
+                        </div>
+                        <button class="btn-primary mt-4" onclick="createAnniversary()">💾 保存纪念日</button>
+                    </div>
+
+                    <!-- 列表 -->
+                    <div>
+                        <div class="flex items-center justify-between mb-3">
+                            <h4 class="font-bold">📋 全部纪念日</h4>
+                            <button class="btn-secondary text-xs px-3 py-1" onclick="loadAnniversaries()">🔄 刷新</button>
+                        </div>
+                        <div id="anniversaryList" class="space-y-2">加载中...</div>
+                    </div>
+                </div>
             </div>
+        </div>
+    </div>
+
+    <div id="desktopPet" class="desktop-pet" title="可拖拽桌宠，双击可打招呼">
+        <div id="petBody" class="pet-body state-idle">🐾</div>
+        <div id="petBubble" class="pet-bubble">嗨～我是你的桌宠助手，点我或双击试试。</div>
+        <div id="petMenu" class="pet-menu">
+            <button onclick="petQuickAction('topic')">💡 生成开场话题</button>
+            <button onclick="petQuickAction('briefing')">📝 今日通报</button>
+            <button onclick="petQuickAction('chat')">💬 打开聊天页</button>
+            <button onclick="petQuickAction('toggleRoam')">🚶 开关自动巡游</button>
+            <button onclick="petQuickAction('toggleBubble')">💭 开关气泡</button>
+            <button onclick="petQuickAction('scaleUp')">➕ 放大桌宠</button>
+            <button onclick="petQuickAction('scaleDown')">➖ 缩小桌宠</button>
         </div>
     </div>
     
@@ -1116,6 +1327,12 @@
             loadTopicSuggestion();
             loadDailyTodos();
             refreshDataScopeSummary();
+            // 加载情绪状态
+            loadEmotionState();
+            // 功能助手列表
+            loadAssistantSkills();
+            // 初始化桌宠
+            initDesktopPet();
             // 检查服务状态
             checkServiceStatus();
             // 每10秒检查一次服务状态
@@ -1285,6 +1502,7 @@
             else if (tabName === 'stats') loadStats();
             else if (tabName === 'personality') loadPersonality();
             else if (tabName === 'settings') refreshDataScopeSummary();
+            else if (tabName === 'anniversaries') loadAnniversaries();
         }
         
         function switchMemoryView(viewName) {
@@ -1431,6 +1649,34 @@
                             // 去掉光标，显示最终文本
                             msgContent.textContent = payload.full_response || fullText;
                             
+                            // 更新情绪 badge
+                            if (payload.emotion) updateEmotionBadge(payload.emotion);
+
+                            // 添加 TTS 按钮
+                            const finalText = payload.full_response || fullText;
+                            const timeRow = document.createElement('div');
+                            timeRow.style.display = 'flex';
+                            timeRow.style.alignItems = 'center';
+                            timeRow.style.gap = '4px';
+                            const timeDiv = document.createElement('div');
+                            timeDiv.className = 'message-time';
+                            timeDiv.textContent = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+                            const speakBtn = document.createElement('button');
+                            speakBtn.className = 'btn-speak';
+                            speakBtn.title = '朗读此消息';
+                            speakBtn.textContent = '🔊';
+                            speakBtn.onclick = () => speakText(finalText, speakBtn);
+                            timeRow.appendChild(timeDiv);
+                            timeRow.appendChild(speakBtn);
+                            const contentDiv = msgContent.parentElement;
+                            if (contentDiv) {
+                                // Remove any existing time elements (plain div or time-row) appended during streaming
+                                Array.from(contentDiv.children).forEach(child => {
+                                    if (child !== msgContent) child.remove();
+                                });
+                                contentDiv.appendChild(timeRow);
+                            }
+                            
                             // 记录到历史
                             const now = new Date();
                             messageHistory.push({ 
@@ -1482,6 +1728,7 @@
                 const reply = data.ai_response || data.response;
                 if (reply) {
                     addMessage(reply, 'ai');
+                    if (data.emotion) updateEmotionBadge(data.emotion);
                 } else {
                     addMessage('❌ API 未返回有效回复', 'error');
                 }
@@ -1518,12 +1765,28 @@
             msgContent.className = 'message-content';
             msgContent.textContent = content;
             
+            const timeRow = document.createElement('div');
+            timeRow.style.display = 'flex';
+            timeRow.style.alignItems = 'center';
+            timeRow.style.gap = '4px';
+            
             const timeDiv = document.createElement('div');
             timeDiv.className = 'message-time';
             timeDiv.textContent = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+            timeRow.appendChild(timeDiv);
+            
+            // Add TTS button for AI messages
+            if (role === 'ai') {
+                const speakBtn = document.createElement('button');
+                speakBtn.className = 'btn-speak';
+                speakBtn.title = '朗读此消息';
+                speakBtn.textContent = '🔊';
+                speakBtn.onclick = () => speakText(content, speakBtn);
+                timeRow.appendChild(speakBtn);
+            }
             
             contentDiv.appendChild(msgContent);
-            contentDiv.appendChild(timeDiv);
+            contentDiv.appendChild(timeRow);
             
             wrapper.appendChild(avatar);
             wrapper.appendChild(contentDiv);
@@ -2587,6 +2850,526 @@
 
         function hideTopicSuggestion() {
             document.getElementById('topicSuggestionBar').classList.add('hidden');
+        }
+
+        // ==================== 情绪状态 ====================
+        function updateEmotionBadge(emotion) {
+            if (!emotion) return;
+            const badge = document.getElementById('emotionBadge');
+            if (badge) {
+                badge.textContent = `${emotion.emoji || ''} ${emotion.label || ''}`;
+                badge.title = `当前情绪: ${emotion.summary || emotion.label || ''}\n点击进入对话`;
+            }
+        }
+
+        async function loadEmotionState() {
+            try {
+                const cid = activeCharacterId || 'default';
+                const resp = await fetch(`${API_BASE}/emotion/state?character_id=${cid}`);
+                const data = await resp.json();
+                if (data.status === 'success' && data.emotion) {
+                    updateEmotionBadge(data.emotion);
+                }
+            } catch (e) {
+                // 忽略，不影响功能
+            }
+        }
+
+        // ==================== 语音 TTS / STT ====================
+        let recognition = null;
+        let isRecording = false;
+
+        function speakText(text, btn) {
+            if (!('speechSynthesis' in window)) {
+                showToast('浏览器不支持语音合成', 'error');
+                return;
+            }
+            // 如果已在朗读则停止
+            if (window.speechSynthesis.speaking) {
+                window.speechSynthesis.cancel();
+                if (btn) btn.textContent = '🔊';
+                return;
+            }
+            const utter = new SpeechSynthesisUtterance(text);
+            utter.lang = 'zh-CN';
+            utter.rate = 1.0;
+            utter.pitch = 1.1;
+            // 选择女声（如果可用）
+            const voices = window.speechSynthesis.getVoices();
+            const zhVoices = voices.filter(v => v.lang.startsWith('zh'));
+            const zhVoice = zhVoices.find(v => v.name.toLowerCase().includes('female')) || zhVoices[0];
+            if (zhVoice) utter.voice = zhVoice;
+            if (btn) {
+                btn.textContent = '⏹️';
+                utter.onend = () => { btn.textContent = '🔊'; };
+                utter.onerror = () => { btn.textContent = '🔊'; };
+            }
+            window.speechSynthesis.speak(utter);
+        }
+
+        function toggleVoiceInput() {
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (!SpeechRecognition) {
+                showToast('浏览器不支持语音识别（推荐使用 Chrome）', 'error');
+                return;
+            }
+            const btn = document.getElementById('voiceBtn');
+            if (isRecording) {
+                if (recognition) recognition.stop();
+                return;
+            }
+            recognition = new SpeechRecognition();
+            recognition.lang = 'zh-CN';
+            recognition.continuous = false;
+            recognition.interimResults = false;
+            recognition.onstart = () => {
+                isRecording = true;
+                btn.classList.add('recording');
+                btn.textContent = '⏹️';
+            };
+            recognition.onresult = (event) => {
+                const transcript = event.results[0][0].transcript;
+                const input = document.getElementById('messageInput');
+                input.value = (input.value ? input.value + ' ' : '') + transcript;
+                input.focus();
+            };
+            recognition.onend = () => {
+                isRecording = false;
+                btn.classList.remove('recording');
+                btn.textContent = '🎤';
+            };
+            recognition.onerror = (e) => {
+                isRecording = false;
+                btn.classList.remove('recording');
+                btn.textContent = '🎤';
+                if (e.error !== 'no-speech') showToast('语音识别失败: ' + e.error, 'error');
+            };
+            recognition.start();
+        }
+
+        // ==================== 纪念日管理 ====================
+        async function loadAnniversaries() {
+            try {
+                const resp = await fetch(`${API_BASE}/anniversaries?include_builtin=true`);
+                const data = await resp.json();
+                renderAnniversaryList(data.anniversaries || []);
+            } catch (e) {
+                document.getElementById('anniversaryList').innerHTML = '<p class="text-red-500">加载失败</p>';
+            }
+            // 加载即将到来
+            try {
+                const resp2 = await fetch(`${API_BASE}/anniversaries/upcoming?within_days=7`);
+                const data2 = await resp2.json();
+                const upcoming = data2.anniversaries || [];
+                const container = document.getElementById('upcomingAnniversaries');
+                const list = document.getElementById('upcomingList');
+                if (upcoming.length > 0) {
+                    list.innerHTML = upcoming.map(a => {
+                        const d = a.days_until;
+                        const label = d === 0 ? '🎉 今天！' : d === 1 ? '明天' : `${d} 天后`;
+                        return `<div class="text-sm text-pink-800 py-1">
+                            <span class="font-bold">${a.title}</span>
+                            <span class="ml-2 text-pink-600">${a.next_occurrence || ''}</span>
+                            <span class="ml-2 font-semibold">${label}</span>
+                            ${a.description ? `<span class="ml-2 text-gray-500">${a.description}</span>` : ''}
+                        </div>`;
+                    }).join('');
+                    container.classList.remove('hidden');
+                } else {
+                    container.classList.add('hidden');
+                }
+            } catch (e) { /* ignore */ }
+        }
+
+        function renderAnniversaryList(items) {
+            const container = document.getElementById('anniversaryList');
+            if (!items.length) {
+                container.innerHTML = '<p class="text-gray-400 italic">暂无纪念日，点击上方添加。</p>';
+                return;
+            }
+            container.innerHTML = items.map(a => {
+                const d = a.days_until;
+                const badge = d === 0
+                    ? '<span class="text-xs bg-pink-500 text-white px-2 py-0.5 rounded-full ml-2">今天🎉</span>'
+                    : d !== null && d <= 7
+                        ? `<span class="text-xs bg-yellow-400 text-white px-2 py-0.5 rounded-full ml-2">${d}天后</span>`
+                        : '';
+                const isBuiltin = a.builtin ? '<span class="text-xs text-gray-400 ml-1">(内置)</span>' : '';
+                const deleteBtn = !a.builtin
+                    ? `<button class="text-xs text-red-400 hover:text-red-600" onclick="deleteAnniversary('${a.id}')">删除</button>`
+                    : '';
+                return `<div class="flex items-center justify-between p-3 bg-white border rounded-lg">
+                    <div>
+                        <span class="font-semibold">${a.title}${isBuiltin}</span>${badge}
+                        <span class="text-xs text-gray-500 ml-2">${a.month}月${a.day}日 ${a.recurring ? '(每年)' : (a.year ? a.year+'年' : '')}</span>
+                        ${a.description ? `<p class="text-xs text-gray-400 mt-0.5">${a.description}</p>` : ''}
+                    </div>
+                    <div class="flex gap-2">${deleteBtn}</div>
+                </div>`;
+            }).join('');
+        }
+
+        async function createAnniversary() {
+            const title = document.getElementById('annTitle').value.trim();
+            const month = parseInt(document.getElementById('annMonth').value);
+            const day = parseInt(document.getElementById('annDay').value);
+            const desc = document.getElementById('annDesc').value.trim();
+            const recurring = document.getElementById('annRecurring').checked;
+            if (!title || !month || !day) {
+                showToast('请填写名称、月份和日期', 'error');
+                return;
+            }
+            try {
+                const resp = await fetch(`${API_BASE}/anniversaries`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ title, month, day, recurring, description: desc })
+                });
+                const data = await resp.json();
+                if (data.status === 'success') {
+                    showToast('✓ 纪念日已保存', 'success');
+                    document.getElementById('annTitle').value = '';
+                    document.getElementById('annMonth').value = '';
+                    document.getElementById('annDay').value = '';
+                    document.getElementById('annDesc').value = '';
+                    await loadAnniversaries();
+                } else {
+                    showToast(data.detail || '保存失败', 'error');
+                }
+            } catch (e) {
+                showToast('保存失败: ' + e.message, 'error');
+            }
+        }
+
+        async function deleteAnniversary(id) {
+            if (!confirm('确定删除这个纪念日？')) return;
+            try {
+                const resp = await fetch(`${API_BASE}/anniversaries/${id}`, { method: 'DELETE' });
+                const data = await resp.json();
+                if (data.status === 'success') {
+                    showToast('✓ 已删除', 'success');
+                    await loadAnniversaries();
+                } else {
+                    showToast(data.detail || '删除失败', 'error');
+                }
+            } catch (e) {
+                showToast('删除失败: ' + e.message, 'error');
+            }
+        }
+
+        // ==================== 功能助手 ====================
+        async function loadAssistantSkills() {
+            const box = document.getElementById('assistantSkillList');
+            if (!box) return;
+            try {
+                const resp = await fetch(`${API_BASE}/assistant/skills`);
+                const data = await resp.json();
+                const skills = data.skills || [];
+                if (!skills.length) {
+                    box.textContent = '暂无技能';
+                    return;
+                }
+                box.innerHTML = skills.map(s => `
+                    <div class="mb-1">
+                        <span class="font-semibold text-indigo-700">${s.title}</span>
+                        <span class="text-gray-500">(${s.name})</span>：${s.description}
+                    </div>
+                `).join('');
+            } catch (e) {
+                box.textContent = '技能加载失败';
+            }
+        }
+
+        async function assistantSuggest() {
+            const input = document.getElementById('assistantUserInput');
+            const result = document.getElementById('assistantSuggestResult');
+            const msg = (input?.value || '').trim();
+            if (!msg) {
+                showToast('请先输入内容', 'error');
+                return;
+            }
+            try {
+                const resp = await fetch(`${API_BASE}/assistant/suggest`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message: msg }),
+                });
+                const data = await resp.json();
+                const sug = data.suggestion || {};
+                const intent = sug.intent?.intent || 'unknown';
+                const skills = (sug.recommended_skills || []).join('、');
+                result.textContent = `识别意图: ${intent}；推荐技能: ${skills || '无'}`;
+            } catch (e) {
+                result.textContent = '推荐失败';
+            }
+        }
+
+        // ==================== 桌宠增强版 ====================
+        let petRuntime = null;
+
+        function petQuickAction(action) {
+            if (!petRuntime) return;
+            const { pet, bubble, menu, setBubble, saveSettings, config } = petRuntime;
+            if (action === 'chat') {
+                goTab('chat');
+                menu.classList.remove('show');
+                return;
+            }
+            if (action === 'toggleRoam') {
+                config.autoRoam = !config.autoRoam;
+                setBubble(config.autoRoam ? '已开启自动巡游～' : '已关闭自动巡游。');
+                saveSettings();
+                return;
+            }
+            if (action === 'toggleBubble') {
+                config.showBubble = !config.showBubble;
+                bubble.style.display = config.showBubble ? 'block' : 'none';
+                saveSettings();
+                return;
+            }
+            if (action === 'scaleUp' || action === 'scaleDown') {
+                const delta = action === 'scaleUp' ? 0.1 : -0.1;
+                config.scale = Math.max(0.8, Math.min(1.8, (config.scale || 1) + delta));
+                pet.style.transform = `scale(${config.scale})`;
+                saveSettings();
+                return;
+            }
+            if (action === 'topic') {
+                petRunSkill('topic_suggestion', (data) => {
+                    const topic = data?.result?.topic || '';
+                    if (topic) setBubble(`💡 ${topic}`);
+                });
+                return;
+            }
+            if (action === 'briefing') {
+                petRunSkill('daily_briefing', (data) => {
+                    const text = data?.result?.message || '';
+                    if (text) setBubble(text.slice(0, 40) + (text.length > 40 ? '…' : ''));
+                });
+                return;
+            }
+        }
+
+        async function petRunSkill(skill, onOk) {
+            try {
+                const cid = activeCharacterId || 'default';
+                const resp = await fetch(`${API_BASE}/assistant/execute`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ skill, character_id: cid, params: {} }),
+                });
+                const data = await resp.json();
+                onOk?.(data);
+            } catch (e) {
+                petRuntime?.setBubble('网络开小差了，稍后再试～');
+            }
+        }
+
+        function initDesktopPet() {
+            if (petRuntime && petRuntime.initialized) return;
+            const pet = document.getElementById('desktopPet');
+            const bubble = document.getElementById('petBubble');
+            const body = document.getElementById('petBody');
+            const menu = document.getElementById('petMenu');
+            if (!pet || !bubble || !body || !menu) return;
+
+            const lines = [
+                '记得喝水呀～',
+                '要不要先做最重要的一件事？',
+                '我可以帮你想话题开场。',
+                '累了就休息一下，我在。',
+                '今天也一起稳稳推进吧。'
+            ];
+
+            const PET_STORAGE_KEY = 'desktop_pet_settings_v2';
+            const stateEmoji = {
+                idle: '🐾',
+                walking: '🚶',
+                thinking: '🤔',
+                sleeping: '😴'
+            };
+            const config = {
+                left: null,
+                top: null,
+                scale: 1,
+                autoRoam: true,
+                showBubble: true
+            };
+            try {
+                const raw = localStorage.getItem(PET_STORAGE_KEY);
+                if (raw) Object.assign(config, JSON.parse(raw));
+            } catch (e) {}
+
+            let drag = { down: false, startX: 0, startY: 0, left: 0, top: 0 };
+            let currentState = 'idle';
+
+            const saveSettings = () => {
+                try {
+                    localStorage.setItem(PET_STORAGE_KEY, JSON.stringify(config));
+                } catch (e) {}
+            };
+
+            const clampToViewport = () => {
+                const rect = pet.getBoundingClientRect();
+                const maxX = Math.max(0, window.innerWidth - rect.width - 4);
+                const maxY = Math.max(0, window.innerHeight - rect.height - 4);
+                const nowX = Math.max(0, Math.min(maxX, rect.left));
+                const nowY = Math.max(0, Math.min(maxY, rect.top));
+                pet.style.left = `${nowX}px`;
+                pet.style.top = `${nowY}px`;
+                config.left = nowX;
+                config.top = nowY;
+                saveSettings();
+            };
+
+            const setState = (s) => {
+                currentState = s;
+                body.classList.remove('state-idle', 'state-walking', 'state-thinking', 'state-sleeping');
+                body.classList.add(`state-${s}`);
+                body.textContent = stateEmoji[s] || '🐾';
+            };
+
+            const setBubble = (text) => {
+                bubble.textContent = text;
+                if (!config.showBubble) return;
+                bubble.style.display = 'block';
+            };
+
+            const snapToEdge = () => {
+                const rect = pet.getBoundingClientRect();
+                const x = rect.left;
+                const y = rect.top;
+                const right = window.innerWidth - rect.right;
+                const bottom = window.innerHeight - rect.bottom;
+                const min = Math.min(x, y, right, bottom);
+                let tx = x;
+                let ty = y;
+                if (min === x) tx = 8;
+                else if (min === right) tx = Math.max(8, window.innerWidth - rect.width - 8);
+                else if (min === y) ty = 8;
+                else ty = Math.max(8, window.innerHeight - rect.height - 8);
+                pet.style.left = `${tx}px`;
+                pet.style.top = `${ty}px`;
+                config.left = tx;
+                config.top = ty;
+                saveSettings();
+            };
+
+            const autoRoam = () => {
+                if (!config.autoRoam || drag.down) return;
+                if (document.hidden) return;
+                setState('walking');
+                const rect = pet.getBoundingClientRect();
+                const maxX = Math.max(8, window.innerWidth - rect.width - 8);
+                const maxY = Math.max(8, window.innerHeight - rect.height - 8);
+                const roamRangeX = Math.max(0, maxX - 8);
+                const roamRangeY = Math.max(0, maxY - 8);
+                const tx = Math.floor(8 + Math.random() * roamRangeX);
+                const ty = Math.floor(8 + Math.random() * roamRangeY);
+                pet.style.transition = 'left 0.8s ease, top 0.8s ease';
+                pet.style.left = `${tx}px`;
+                pet.style.top = `${ty}px`;
+                window.setTimeout(() => {
+                    pet.style.transition = '';
+                    config.left = tx;
+                    config.top = ty;
+                    saveSettings();
+                    setState('idle');
+                }, 900);
+            };
+
+            pet.style.transform = `scale(${config.scale || 1})`;
+            bubble.style.display = config.showBubble ? 'block' : 'none';
+            if (Number.isFinite(config.left) && Number.isFinite(config.top)) {
+                pet.style.right = 'auto';
+                pet.style.bottom = 'auto';
+                pet.style.left = `${config.left}px`;
+                pet.style.top = `${config.top}px`;
+                clampToViewport();
+            }
+
+            pet.addEventListener('click', () => {
+                menu.classList.remove('show');
+                setState('idle');
+                setBubble(lines[Math.floor(Math.random() * lines.length)]);
+            });
+
+            pet.addEventListener('dblclick', async () => {
+                setState('thinking');
+                await petRunSkill('topic_suggestion', (data) => {
+                    const topic = data?.result?.topic || '';
+                    if (topic) setBubble(`💡 ${topic}`);
+                });
+                setTimeout(() => setState('idle'), 500);
+            });
+
+            pet.addEventListener('contextmenu', (e) => {
+                e.preventDefault();
+                menu.classList.toggle('show');
+            });
+
+            pet.addEventListener('mousedown', (e) => {
+                if (e.button !== 0) return;
+                drag.down = true;
+                pet.classList.add('dragging');
+                setState('walking');
+                menu.classList.remove('show');
+                const rect = pet.getBoundingClientRect();
+                drag.startX = e.clientX;
+                drag.startY = e.clientY;
+                drag.left = rect.left;
+                drag.top = rect.top;
+                pet.style.right = 'auto';
+                pet.style.bottom = 'auto';
+                pet.style.left = `${rect.left}px`;
+                pet.style.top = `${rect.top}px`;
+            });
+
+            window.addEventListener('mousemove', (e) => {
+                if (!drag.down) return;
+                const dx = e.clientX - drag.startX;
+                const dy = e.clientY - drag.startY;
+                const px = Math.max(0, drag.left + dx);
+                const py = Math.max(0, drag.top + dy);
+                pet.style.left = `${px}px`;
+                pet.style.top = `${py}px`;
+            });
+
+            window.addEventListener('mouseup', () => {
+                if (!drag.down) return;
+                drag.down = false;
+                pet.classList.remove('dragging');
+                snapToEdge();
+                setState('idle');
+            });
+
+            window.addEventListener('resize', () => {
+                clampToViewport();
+            });
+
+            // 随机状态切换（参考常见桌宠“待机/思考/睡眠”）
+            const moodTimer = setInterval(() => {
+                if (drag.down) return;
+                if (currentState === 'walking') return;
+                const r = Math.random();
+                if (r < 0.08) setState('sleeping');
+                else if (r < 0.2) setState('thinking');
+                else setState('idle');
+            }, 6000);
+
+            // 自动巡游（参考高 star 项目常见“wander”行为）
+            const roamTimer = setInterval(autoRoam, 8000);
+
+            petRuntime = { pet, bubble, menu, config, setBubble, saveSettings, initialized: true, timers: [moodTimer, roamTimer] };
+        }
+
+        // ==================== PWA Service Worker 注册 ====================
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/static/sw.js').catch((err) => {
+                    console.warn('[SW] 注册失败:', err);
+                });
+            });
         }
     </script>
 </body>

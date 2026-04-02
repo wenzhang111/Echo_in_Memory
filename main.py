@@ -30,6 +30,9 @@ from style_learner import StyleLearner
 from topic_initiator import topic_initiator, get_time_context
 from intent_classifier import intent_classifier
 from daily_briefing import daily_briefing_manager
+from emotion_engine import emotion_engine
+from anniversary_manager import anniversary_manager
+from assistant_skills import FunctionalAssistantHub
 
 
 logging.basicConfig(
@@ -91,6 +94,17 @@ class MemoryCorrectionRequest(BaseModel):
     correction_reason: str = ""
 
 
+class StyleControlRequest(BaseModel):
+    style_strength: Optional[str] = None
+    negative_constraints: Optional[List[str]] = None
+
+
+def _safe_character_id(raw_id: str) -> str:
+    import re
+    safe = re.sub(r"[^a-zA-Z0-9_\-]", "_", str(raw_id or "default"))
+    return safe[:64] if safe else "default"
+
+
 class DailyTodoItem(BaseModel):
     title: str
     time_hint: str = ""
@@ -100,6 +114,53 @@ class DailyTodoItem(BaseModel):
 
 class DailyTodosUpdateRequest(BaseModel):
     todos: List[DailyTodoItem]
+
+
+class EmotionUpdateRequest(BaseModel):
+    happy: Optional[float] = None
+    anxious: Optional[float] = None
+    missing: Optional[float] = None
+    tired: Optional[float] = None
+    excited: Optional[float] = None
+
+
+class AnniversaryCreateRequest(BaseModel):
+    title: str
+    month: int
+    day: int
+    recurring: bool = True
+    year: Optional[int] = None
+    description: str = ""
+
+
+class AnniversaryUpdateRequest(BaseModel):
+    title: Optional[str] = None
+    month: Optional[int] = None
+    day: Optional[int] = None
+    recurring: Optional[bool] = None
+    year: Optional[int] = None
+    description: Optional[str] = None
+
+
+class AssistantExecuteRequest(BaseModel):
+    skill: str
+    character_id: Optional[str] = None
+    params: dict = Field(default_factory=dict)
+
+
+class AssistantSuggestRequest(BaseModel):
+    message: str
+
+
+assistant_hub = FunctionalAssistantHub(
+    character_manager=character_manager,
+    topic_initiator=topic_initiator,
+    daily_briefing_manager=daily_briefing_manager,
+    intent_classifier=intent_classifier,
+    emotion_engine=emotion_engine,
+    anniversary_manager=anniversary_manager,
+    memory_manager=memory_manager,
+)
 
 
 @app.on_event("startup")
@@ -180,6 +241,9 @@ async def chat(request: ChatRequest):
             "ai_response": response,
             "timestamp": datetime.now().isoformat(),
             "message_count": db.get_conversation_count(),
+            "emotion": emotion_engine.update_from_text(
+                character_manager.get_active_id(), request.message, response
+            ).badge_data(),
         }
     except HTTPException:
         raise
@@ -260,6 +324,8 @@ async def chat_with_api(request: ChatAPIRequest):
             character_id=active_id,
         )
         character_manager.add_chat_message(active_id, request.message, response)
+        emotion_state = emotion_engine.update_from_text(active_id, request.message, response)
+        memory_manager.boost_emotional_memories(request.message, response)
 
         return {
             "status": "success",
@@ -268,6 +334,7 @@ async def chat_with_api(request: ChatAPIRequest):
             "model_used": request.model,
             "timestamp": datetime.now().isoformat(),
             "message_count": db.get_conversation_count(),
+            "emotion": emotion_state.badge_data(),
         }
     except HTTPException:
         raise
@@ -310,13 +377,20 @@ async def chat_api_stream(request: ChatAPIRequest):
                 character_id=active_id,
             )
             character_manager.add_chat_message(active_id, request.message, response)
+            emotion_state = emotion_engine.update_from_text(active_id, request.message, response)
+            memory_manager.boost_emotional_memories(request.message, response)
 
             for char in response:
                 payload = json.dumps({"type": "chunk", "content": char}, ensure_ascii=False)
                 yield f"data: {payload}\n\n"
 
             done = json.dumps(
-                {"type": "done", "full_response": response, "message_count": db.get_conversation_count()},
+                {
+                    "type": "done",
+                    "full_response": response,
+                    "message_count": db.get_conversation_count(),
+                    "emotion": emotion_state.badge_data(),
+                },
                 ensure_ascii=False,
             )
             yield f"data: {done}\n\n"
@@ -424,19 +498,12 @@ async def get_memory_context():
 
 
 @app.get("/memory/all")
-async def get_all_memories(category: str = None, limit: int = 50):
-    if category:
-        memories = [
-            {**m, "category": category}
-            for m in db.get_memories_by_category(category)[:limit]
-        ]
-    else:
-        memories = []
-        categories = ["personality", "relationship", "experience", "preference", "important_info"]
-        per_cat = max(5, limit // len(categories))
-        for cat in categories:
-            cat_memories = db.get_memories_by_category(cat)[:per_cat]
-            memories.extend([{**m, "category": cat} for m in cat_memories])
+async def get_all_memories(category: str = None, limit: int = 50, emotion_priority: bool = False):
+    memories = memory_manager.get_ranked_memories(
+        category=category,
+        limit=limit,
+        emotion_priority=emotion_priority,
+    )
     return {"total": len(memories), "memories": memories}
 
 
@@ -508,10 +575,69 @@ async def correct_memory_item(data: MemoryCorrectionRequest):
     }
 
 
+@app.post("/memory/correct-priority")
+async def correct_memory_item_priority(data: MemoryCorrectionRequest):
+    memory = db.get_memory_by_id(data.memory_id)
+    if not memory:
+        raise HTTPException(status_code=404, detail="记忆不存在")
+
+    corrected = (data.corrected_content or "").strip()
+    if not corrected:
+        raise HTTPException(status_code=400, detail="corrected_content 不能为空")
+
+    db.update_long_term_memory(
+        memory_id=data.memory_id,
+        content=corrected,
+        importance_score=0.99,
+    )
+    db.increment_memory_reference(data.memory_id)
+    db.increment_memory_reference(data.memory_id)
+
+    reason = (data.correction_reason or "").strip() or "未提供原因"
+    db.add_long_term_memory(
+        category="important_info",
+        key=f"priority_fix_{data.memory_id}",
+        content=f"用户通过高优先通道纠错记忆#{data.memory_id}：{reason}",
+        importance_score=0.99,
+    )
+
+    return {
+        "status": "success",
+        "priority": "high",
+        "message": "高优先纠错已生效",
+        "before": memory,
+        "after": db.get_memory_by_id(data.memory_id),
+    }
+
+
 @app.post("/intent/detect")
 async def detect_intent(data: IntentDetectRequest):
     result = intent_classifier.detect(data.message)
     return {"status": "success", "result": result.to_dict()}
+
+
+@app.get("/assistant/skills")
+async def get_assistant_skills():
+    return {"status": "success", "skills": assistant_hub.list_skills()}
+
+
+@app.post("/assistant/execute")
+async def execute_assistant_skill(data: AssistantExecuteRequest):
+    result = assistant_hub.execute(
+        skill_name=(data.skill or "").strip(),
+        character_id=data.character_id,
+        params=data.params or {},
+    )
+    if result.get("status") != "success":
+        raise HTTPException(status_code=404, detail=result.get("detail", "技能执行失败"))
+    return result
+
+
+@app.post("/assistant/suggest")
+async def suggest_assistant_skills(data: AssistantSuggestRequest):
+    if not (data.message or "").strip():
+        raise HTTPException(status_code=400, detail="message 不能为空")
+    return {"status": "success", "suggestion": assistant_hub.suggest(data.message)}
 
 
 @app.get("/daily/todos")
@@ -844,6 +970,74 @@ async def get_style_profile(character_id: str = None):
     }
 
 
+@app.put("/style/control")
+async def update_style_control(data: StyleControlRequest, character_id: str = None):
+    cid = _safe_character_id(character_id or character_manager.get_active_id())
+    profile = StyleLearner.load_profile(cid)
+    if not profile:
+        raise HTTPException(status_code=404, detail="风格档案不存在，请先学习风格")
+
+    allowed = {"natural", "balanced", "strong"}
+    if data.style_strength is not None:
+        if data.style_strength not in allowed:
+            raise HTTPException(status_code=400, detail=f"style_strength 必须是 {sorted(list(allowed))}")
+        profile.style_strength = data.style_strength
+    if data.negative_constraints is not None:
+        profile.negative_constraints = [x.strip() for x in data.negative_constraints if str(x).strip()][:12]
+
+    saved = StyleLearner.save_profile(profile, cid)
+    if saved is None:
+        raise HTTPException(status_code=400, detail="非法角色ID")
+
+    return {"status": "success", "character_id": cid, "profile": profile.to_dict()}
+
+
+@app.get("/metrics/summary")
+async def get_metrics_summary(character_id: str = None, window_days: int = 7):
+    cid = character_id or character_manager.get_active_id()
+    all_memories = memory_manager.get_ranked_memories(limit=10000)
+    if all_memories:
+        used = sum(1 for m in all_memories if int(m.get("reference_count", 0) or 0) > 0)
+        correction = sum(1 for m in all_memories if str(m.get("key", "")).startswith(("memory_fix_", "priority_fix_")))
+        memory_hit_rate = round(used / len(all_memories), 4)
+        correction_rate = round(correction / len(all_memories), 4)
+        memory_misrecall_rate = correction_rate
+    else:
+        memory_hit_rate = 0.0
+        correction_rate = 0.0
+        memory_misrecall_rate = 0.0
+
+    pairs = db.get_conversation_pairs(limit=300, character_id=cid)
+    profile = StyleLearner.load_profile(cid)
+    style_similarity = 0.0
+    style_consistency = 0.0
+    user_satisfaction_proxy = 0.5
+    if profile:
+        learner = StyleLearner()
+        recent_ai = [p["ai_response"] for p in pairs[:60] if p.get("ai_response")]
+        if recent_ai:
+            style_similarity = round(max(0.0, 1.0 - learner.detect_style_drift(profile, recent_ai)), 4)
+            style_consistency = round(max(0.0, 1.0 - learner.detect_style_drift(profile, recent_ai[:20])), 4)
+            user_satisfaction_proxy = round(max(0.0, min(1.0, 1.0 - memory_misrecall_rate * 0.6)), 4)
+
+    return {
+        "status": "success",
+        "character_id": cid,
+        "window_days": window_days,
+        "memory_metrics": {
+            "memory_hit_rate": memory_hit_rate,
+            "memory_misrecall_rate": memory_misrecall_rate,
+            "user_correction_rate": correction_rate,
+        },
+        "style_metrics": {
+            "style_similarity": style_similarity,
+            "style_consistency": style_consistency,
+            "user_satisfaction_proxy": user_satisfaction_proxy,
+        },
+        "weekly_regression_recommendation": "建议每周固定时间调用本接口并记录趋势用于回归对比",
+    }
+
+
 @app.post("/topic/proactive/trigger")
 async def trigger_proactive_chat(character_id: str = None, force: bool = False):
     active_id = character_id or character_manager.get_active_id()
@@ -937,6 +1131,104 @@ async def suggest_topic(character_id: str = None, use_llm: bool = False):
 @app.get("/topic/time-context")
 async def get_current_time_context():
     return get_time_context()
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# 情感状态 API
+# ──────────────────────────────────────────────────────────────────────────
+
+@app.get("/emotion/state")
+async def get_emotion_state(character_id: str = None):
+    """获取当前角色的情绪状态"""
+    cid = character_id or character_manager.get_active_id()
+    state = emotion_engine.load(cid)
+    return {"status": "success", "character_id": cid, "emotion": state.badge_data(), "raw": state.to_dict()}
+
+
+@app.post("/emotion/update")
+async def update_emotion_state(data: EmotionUpdateRequest, character_id: str = None):
+    """手动调整情绪值（各维度 0-1）"""
+    cid = character_id or character_manager.get_active_id()
+    updates = {k: v for k, v in data.model_dump().items() if v is not None}
+    if not updates:
+        raise HTTPException(status_code=400, detail="至少提供一个情绪维度值")
+    state = emotion_engine.set_state(cid, updates)
+    return {"status": "success", "character_id": cid, "emotion": state.badge_data()}
+
+
+@app.post("/emotion/reset")
+async def reset_emotion_state(character_id: str = None):
+    """重置情绪为默认值"""
+    cid = character_id or character_manager.get_active_id()
+    state = emotion_engine.reset(cid)
+    return {"status": "success", "character_id": cid, "emotion": state.badge_data()}
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# 主动记忆管理 API
+# ──────────────────────────────────────────────────────────────────────────
+
+@app.post("/memory/compact")
+async def compact_memories(category: str = None):
+    """压缩冗余记忆（合并相同前缀的重复条目）"""
+    removed = memory_manager.compress_old_memories(category=category)
+    return {"status": "success", "removed_count": removed, "category": category or "全部"}
+
+
+@app.post("/memory/decay")
+async def decay_memories(age_days: int = 30):
+    """对冷门旧记忆执行重要性衰减"""
+    decayed = memory_manager.decay_trivial_memories(age_days=age_days)
+    return {"status": "success", "decayed_count": decayed, "age_days": age_days}
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# 纪念日 API
+# ──────────────────────────────────────────────────────────────────────────
+
+@app.get("/anniversaries")
+async def list_anniversaries(include_builtin: bool = True):
+    """列出所有纪念日（含内置节日）"""
+    items = anniversary_manager.list_anniversaries(include_builtin=include_builtin)
+    return {"status": "success", "count": len(items), "anniversaries": items}
+
+
+@app.get("/anniversaries/upcoming")
+async def get_upcoming_anniversaries(within_days: int = 7):
+    """获取未来 N 天内的纪念日"""
+    items = anniversary_manager.get_upcoming(within_days=within_days)
+    return {"status": "success", "within_days": within_days, "count": len(items), "anniversaries": items}
+
+
+@app.post("/anniversaries")
+async def create_anniversary(data: AnniversaryCreateRequest):
+    """创建新纪念日"""
+    try:
+        ann = anniversary_manager.create_anniversary(data.model_dump())
+        return {"status": "success", "anniversary": ann.to_dict()}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.put("/anniversaries/{ann_id}")
+async def update_anniversary_item(ann_id: str, data: AnniversaryUpdateRequest):
+    """更新纪念日"""
+    updates = {k: v for k, v in data.model_dump().items() if v is not None}
+    try:
+        ann = anniversary_manager.update_anniversary(ann_id, updates)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    if not ann:
+        raise HTTPException(status_code=404, detail="纪念日不存在")
+    return {"status": "success", "anniversary": ann.to_dict()}
+
+
+@app.delete("/anniversaries/{ann_id}")
+async def delete_anniversary_item(ann_id: str):
+    """删除纪念日"""
+    if not anniversary_manager.delete_anniversary(ann_id):
+        raise HTTPException(status_code=404, detail="纪念日不存在")
+    return {"status": "success", "deleted_id": ann_id}
 
 
 @app.exception_handler(HTTPException)

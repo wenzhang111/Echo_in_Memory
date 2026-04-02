@@ -3,8 +3,9 @@
 """
 import logging
 import re
+from collections import defaultdict
 from typing import List, Dict, Optional, Set, Tuple
-from datetime import datetime
+from datetime import datetime, timedelta
 import json
 import sys
 from pathlib import Path
@@ -51,6 +52,11 @@ class LongTermMemoryManager:
         self.commitment_words = [
             '喜欢你', '爱你', '只想跟你', '只跟你', '只要你', '不想失去你'
         ]
+        self.memory_tier_rules = {
+            "short_term": {"max_age_days": 3, "min_ref_count": 0},
+            "mid_term": {"max_age_days": 30, "min_ref_count": 1},
+            "long_term": {"max_age_days": 99999, "min_ref_count": 2},
+        }
 
     @staticmethod
     def _clean_text(text: str) -> str:
@@ -356,20 +362,20 @@ class LongTermMemoryManager:
         """
         context = "## 我对你的了解 ##\n"
         
-        important_memories = db.get_memories_by_category('relationship')[:4]
+        important_memories = self._rank_memories(db.get_memories_by_category('relationship'))[:4]
         
         if important_memories:
             context += "### 关于我们的关系 ###\n"
             for mem in important_memories:
                 context += f"- {mem['content']}\n"
         
-        preference_memories = db.get_memories_by_category('preference')[:6]
+        preference_memories = self._rank_memories(db.get_memories_by_category('preference'))[:6]
         if preference_memories:
             context += "\n### 你的喜好 ###\n"
             for mem in preference_memories:
                 context += f"- {mem['content']}\n"
         
-        experience_memories = db.get_memories_by_category('experience')[:6]
+        experience_memories = self._rank_memories(db.get_memories_by_category('experience'))[:6]
         if experience_memories:
             context += "\n### 时间线里的你 ###\n"
             for mem in experience_memories:
@@ -384,7 +390,8 @@ class LongTermMemoryManager:
         """
         搜索相关的记忆
         """
-        return db.search_memories(keyword)
+        results = db.search_memories(keyword)
+        return self._rank_memories(results)
     
     def get_personality_summary(self) -> str:
         """
@@ -420,6 +427,165 @@ class LongTermMemoryManager:
             f"- 回复策略: {result.strategy}\n"
             f"- 触发依据: {evidence}\n"
         )
+
+    # ──────────────────────────────────────────────────────────────────────
+    # 主动记忆管理（Active Memory Management）
+    # ──────────────────────────────────────────────────────────────────────
+
+    def decay_trivial_memories(self, age_days: int = 30, min_ref_count: int = 0, decay_amount: float = 0.08) -> int:
+        """
+        对"冷门"记忆降低重要性分值，模拟遗忘曲线。
+        - age_days: 记忆创建超过此天数才考虑衰减
+        - min_ref_count: 引用次数 <= 此值才考虑衰减
+        - decay_amount: 每次调用降低的分值
+
+        返回衰减条数。
+        """
+        conn = db.get_connection()
+        cursor = conn.cursor()
+        cutoff_ts = (datetime.now() - timedelta(days=age_days)).isoformat()
+        cursor.execute(
+            """
+            SELECT id, importance_score FROM long_term_memories
+            WHERE created_at < ? AND reference_count <= ? AND importance_score > 0.1
+            """,
+            (cutoff_ts, min_ref_count),
+        )
+        rows = cursor.fetchall()
+        decayed = 0
+        for row in rows:
+            mem_id = row["id"]
+            new_score = max(0.1, round(float(row["importance_score"]) - decay_amount, 4))
+            cursor.execute(
+                "UPDATE long_term_memories SET importance_score = ? WHERE id = ?",
+                (new_score, mem_id),
+            )
+            decayed += 1
+        conn.commit()
+        conn.close()
+        logger.info(f"[记忆衰减] 已对 {decayed} 条冷门记忆降低重要性分值")
+        return decayed
+
+    def boost_emotional_memories(self, user_text: str, ai_text: str, boost_amount: float = 0.05) -> None:
+        """
+        当对话中检测到强情绪信号时，对最近关系类/经历类记忆提升重要性分值。
+        """
+        EMOTION_SIGNALS = [
+            "爱你", "喜欢你", "想念", "想你", "好开心", "太感动", "哭了",
+            "委屈", "幸福", "难受", "崩溃", "感谢", "谢谢你", "永远"
+        ]
+        combined = (user_text or "") + (ai_text or "")
+        if not any(sig in combined for sig in EMOTION_SIGNALS):
+            return
+        conn = db.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            UPDATE long_term_memories
+            SET importance_score = MIN(1.0, importance_score + ?)
+            WHERE category IN ('relationship', 'experience') AND importance_score < 1.0
+            ORDER BY last_updated DESC
+            LIMIT 5
+            """,
+            (boost_amount,),
+        )
+        conn.commit()
+        conn.close()
+    
+    def _classify_memory_tier(self, memory: Dict) -> str:
+        ts = memory.get("last_updated") or memory.get("created_at")
+        ref_count = int(memory.get("reference_count", 0) or 0)
+        age_days = 99999
+        if ts:
+            try:
+                age_days = max(0, (datetime.now() - datetime.fromisoformat(str(ts).replace("Z", ""))).days)
+            except Exception:
+                age_days = 99999
+        if age_days <= self.memory_tier_rules["short_term"]["max_age_days"]:
+            return "short_term"
+        if age_days <= self.memory_tier_rules["mid_term"]["max_age_days"] or ref_count >= self.memory_tier_rules["mid_term"]["min_ref_count"]:
+            return "mid_term"
+        return "long_term"
+
+    def _calculate_memory_score(self, memory: Dict) -> float:
+        importance = float(memory.get("importance_score", 0.5) or 0.5)
+        ref_count = int(memory.get("reference_count", 0) or 0)
+        recency = 0.2
+        ts = memory.get("last_updated") or memory.get("created_at")
+        if ts:
+            try:
+                age_days = max(0, (datetime.now() - datetime.fromisoformat(str(ts).replace("Z", ""))).days)
+                recency = max(0.1, min(1.0, 1.0 - min(age_days, 120) / 120))
+            except Exception:
+                pass
+        frequency = max(0.1, min(1.0, ref_count / 8 if ref_count > 0 else 0.1))
+        emotion = 0.5
+        content = str(memory.get("content", ""))
+        if any(k in content for k in ["爱", "想你", "难受", "开心", "崩溃", "感谢", "委屈"]):
+            emotion = 0.9
+        tier = self._classify_memory_tier(memory)
+        tier_boost = {"short_term": 1.05, "mid_term": 1.0, "long_term": 0.95}.get(tier, 1.0)
+        composite = (importance * 0.45 + recency * 0.2 + emotion * 0.2 + frequency * 0.15) * tier_boost
+        return round(min(1.0, max(0.0, composite)), 4)
+
+    def _rank_memories(self, memories: List[Dict], emotion_priority: bool = False) -> List[Dict]:
+        ranked = []
+        for m in memories or []:
+            item = dict(m)
+            item["memory_tier"] = self._classify_memory_tier(item)
+            item["composite_score"] = self._calculate_memory_score(item)
+            if emotion_priority and any(k in str(item.get("content", "")) for k in ["爱", "想你", "难受", "开心", "崩溃", "委屈"]):
+                item["composite_score"] = round(min(1.0, item["composite_score"] + 0.08), 4)
+            ranked.append(item)
+        ranked.sort(key=lambda x: (x.get("composite_score", 0), x.get("importance_score", 0)), reverse=True)
+        return ranked
+
+    def get_ranked_memories(self, category: Optional[str] = None, limit: int = 50, emotion_priority: bool = False) -> List[Dict]:
+        categories = [category] if category else ["relationship", "preference", "experience", "important_info", "personality"]
+        merged: List[Dict] = []
+        for cat in categories:
+            for m in db.get_memories_by_category(cat):
+                merged.append({**m, "category": cat})
+        return self._rank_memories(merged, emotion_priority=emotion_priority)[:max(1, limit)]
+
+    def compress_old_memories(self, category: str = None, max_per_key_prefix: int = 2) -> int:
+        """
+        合并同一 key 前缀下的冗余记忆，保留重要性最高的若干条，删除其余。
+        这是对 Mem0 "主动记忆管理" 理念的轻量实现。
+
+        返回删除条数。
+        """
+        categories = [category] if category else ["personality", "relationship", "experience", "preference", "important_info"]
+        total_removed = 0
+
+        conn = db.get_connection()
+        cursor = conn.cursor()
+
+        for cat in categories:
+            cursor.execute(
+                "SELECT id, key, importance_score FROM long_term_memories WHERE category = ? ORDER BY key, importance_score DESC",
+                (cat,),
+            )
+            rows = cursor.fetchall()
+            # Group by key prefix to catch near-duplicates like "pref_like_" variants
+            groups: dict = defaultdict(list)
+            for row in rows:
+                prefix = str(row["key"])[:20]
+                groups[prefix].append(row)
+
+            for prefix, group in groups.items():
+                if len(group) <= max_per_key_prefix:
+                    continue
+                # Keep top max_per_key_prefix by importance_score (already sorted DESC)
+                to_delete = group[max_per_key_prefix:]
+                ids_to_delete = [r["id"] for r in to_delete]
+                cursor.executemany("DELETE FROM long_term_memories WHERE id = ?", [(i,) for i in ids_to_delete])
+                total_removed += len(ids_to_delete)
+
+        conn.commit()
+        conn.close()
+        logger.info(f"[记忆压缩] 已删除 {total_removed} 条冗余记忆")
+        return total_removed
 
 
 class MemoryAugmentedPrompt:

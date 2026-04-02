@@ -174,6 +174,15 @@ class Character:
         except Exception:
             pass
 
+        # 情绪状态提示
+        emotion_hint = ""
+        try:
+            from emotion_engine import emotion_engine
+            state = emotion_engine.load(self.id)
+            emotion_hint = state.to_prompt_hint()
+        except Exception:
+            pass
+
         prompt = f"""{self.system_prompt}
 
 ## 基本设定
@@ -187,7 +196,7 @@ class Character:
 {style_prompt}
 {learned_style}
 {time_ctx_str}
-
+{emotion_hint}
 ## 对话原则
 1. **真诚对待**: 真实回应用户的情感和需求
 2. **记住细节**: 参考下面的记忆信息，体现你了解对方
@@ -195,6 +204,17 @@ class Character:
 4. **保持人设**: 始终保持上述性格和说话风格
 5. **风格模仿**: 如果有"从聊天记录中学习到的语言风格"，请严格模仿那些语言习惯（口头禅、语气词、表情使用等）
 """
+        try:
+            if profile and profile.sample_count > 0:
+                strength = getattr(profile, "style_strength", "natural")
+                prompt += f"\n6. **风格强度档位**: 当前档位为 {strength}，在保证自然对话的前提下遵循该档位执行风格。"
+                negative = getattr(profile, "negative_constraints", []) or []
+                if negative:
+                    prompt += "\n7. **负向约束**:\n"
+                    for idx, item in enumerate(negative[:8], 1):
+                        prompt += f"   - {idx}) {item}\n"
+        except Exception:
+            pass
         return prompt
 
 
